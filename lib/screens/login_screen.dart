@@ -66,11 +66,17 @@ class _LoginScreenState extends State<LoginScreen> {
             await dataCubit.checkGradesStatus(studentId, token);
           }
 
+          // ✅ التأكد من حفظ التوكن في ApiService
+          if (state.token != null && state.token!.isNotEmpty) {
+            print('🔑 Token saved in ApiService after login');
+          }
+
           // Use pre-stored messenger instead of context
           messenger.showSnackBar(
             SnackBar(
               content: Text('Welcome $userName!'),
               backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
             ),
           );
         }

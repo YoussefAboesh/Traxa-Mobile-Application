@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:io';
 import 'core/theme.dart';
+import 'core/api_service.dart';
 import 'cubit/auth/auth_cubit.dart';
 import 'cubit/auth/auth_state.dart';
 import 'cubit/data/data_cubit.dart';
@@ -11,6 +12,7 @@ import 'screens/login_screen.dart';
 import 'screens/doctor_screen.dart';
 import 'screens/student_screen.dart';
 
+// Override لتجاوز مشكلة الشهادة self-signed
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -21,7 +23,13 @@ class MyHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ✅ تهيئة التوكن قبل تشغيل التطبيق (لحل مشكلة فقدان التوكن بعد إعادة التشغيل)
+  await ApiService.initToken();
+  
+  // تطبيق الـ Override
   HttpOverrides.global = MyHttpOverrides();
+  
   runApp(const MyApp());
 }
 
