@@ -65,19 +65,45 @@ class Grade {
   }
 
   String get letterGrade {
-    if (total >= 45) return 'A';
-    if (total >= 40) return 'B';
-    if (total >= 35) return 'C';
-    if (total >= 30) return 'D';
-    if (total >= 25) return 'E';
+    if (total >= 95) return 'A+';
+    if (total >= 90) return 'A';
+    if (total >= 85) return 'A-';
+    if (total >= 80) return 'B+';
+    if (total >= 75) return 'B';
+    if (total >= 70) return 'B-';
+    if (total >= 65) return 'C+';
+    if (total >= 60) return 'C';
+    if (total >= 55) return 'C-';
+    if (total >= 53) return 'D+';
+    if (total >= 51) return 'D';
+    if (total >= 50) return 'D-';
     return 'F';
   }
 
-  bool get isPassed => total >= 25;
+  double get gradePoints {
+    if (total >= 95) return 4.0;
+    if (total >= 90) return 4.0;
+    if (total >= 85) return 3.7;
+    if (total >= 80) return 3.5;
+    if (total >= 75) return 3.0;
+    if (total >= 70) return 2.7;
+    if (total >= 65) return 2.5;
+    if (total >= 60) return 2.3;
+    if (total >= 55) return 2.0;
+    if (total >= 53) return 1.7;
+    if (total >= 51) return 1.3;
+    if (total >= 50) return 1.0;
+    return 0.0;
+  }
+
+  bool get isPassed => total >= 50;
+
   Color get gradeColor {
-    if (total >= 45) return const Color(0xFF34D399);
-    if (total >= 35) return const Color(0xFF60A5FA);
-    if (total >= 25) return const Color(0xFFFBBF24);
-    return const Color(0xFFF87171);
+    final letter = letterGrade;
+    if (letter.startsWith('A')) return const Color(0xFF34D399); // Green
+    if (letter.startsWith('B')) return const Color(0xFF60A5FA); // Blue
+    if (letter.startsWith('C')) return const Color(0xFFFBBF24); // Yellow
+    if (letter.startsWith('D')) return const Color(0xFFF97316); // Orange
+    return const Color(0xFFF87171); // Red (F)
   }
 }

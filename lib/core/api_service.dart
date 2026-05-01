@@ -366,6 +366,37 @@ class ApiService {
     }
   }
 
+  // ================= GRADE DISTRIBUTION =================
+
+  static Future<Map<String, double>?> getGradeDistribution(
+      int doctorId, int subjectId, String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/grade-distributions/$doctorId/$subjectId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'midterm': (data['midterm'] ?? 10).toDouble(),
+          'oral': (data['oral'] ?? 5).toDouble(),
+          'practical': (data['practical'] ?? 20).toDouble(),
+          'attendance': (data['attendance'] ?? 5).toDouble(),
+          'assignment': (data['assignment'] ?? 10).toDouble(),
+          'final': (data['final'] ?? 50).toDouble(),
+        };
+      }
+    } catch (e) {
+      print('Error fetching grade distribution: $e');
+    }
+    return null;
+  }
+
   // ================= QR CODE =================
 
   static Future<Map<String, dynamic>> getStudentQRCode(
@@ -477,5 +508,28 @@ class ApiService {
       print('❌ Error changing password: $e');
       return {'success': false, 'error': e.toString()};
     }
+  }
+
+  // ================= MOBILE UPDATES (SSE / Polling) =================
+
+  static Future<Map<String, dynamic>> checkForMobileUpdates(
+      String token, int lastTimestamp) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print('Error checking for updates: $e');
+    }
+    return {'hasUpdate': false};
   }
 }
