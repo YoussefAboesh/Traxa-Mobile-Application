@@ -42,34 +42,44 @@ class _StudentGradesState extends State<StudentGrades> {
     final allSubjects = dataState.subjects;
     final allGrades = dataState.grades;
 
-    // 1. الحصول على جميع درجات الطالب (بدون فلترة)
-    final studentAllGrades = allGrades.where((g) => g.studentId == student?.id).toList();
+    // فلترة درجات الطالب
+    List<Grade> studentGrades =
+        allGrades.where((g) => g.studentId == student?.id).toList();
 
-    // 2. حساب المعدل التراكمي (Cumulative GPA) دائماً من كل الدرجات
-    final cumulativeGPA = _calculateGPA(studentAllGrades, allSubjects);
-
-    // 3. فلترة الدرجات للعرض حسب الاختيارات (Level & Semester)
-    List<Grade> displayGrades = List.from(studentAllGrades);
-
-    if (_selectedSemester != 0) {
-      displayGrades = displayGrades.where((g) => g.semester == _selectedSemester).toList();
+    // فلترة حسب السيمستر
+    if (_selectedSemester == 1) {
+      studentGrades = studentGrades.where((g) => g.semester == 1).toList();
+    } else if (_selectedSemester == 2) {
+      studentGrades = studentGrades.where((g) => g.semester == 2).toList();
     }
 
+    // فلترة حسب المستوى
     if (_selectedLevel != 0) {
-      displayGrades = displayGrades.where((g) => g.level == _selectedLevel).toList();
+      studentGrades = studentGrades
+          .where((g) => g.level == _selectedLevel)
+          .toList();
     }
 
     // ترتيب حسب المادة
-    displayGrades.sort((a, b) => a.subjectName.compareTo(b.subjectName));
+    studentGrades.sort((a, b) => a.subjectName.compareTo(b.subjectName));
 
-    // 4. حساب إحصائيات القائمة المفلترة
-    final filteredGPA = _calculateGPA(displayGrades, allSubjects);
-    final totalCredits = _calculateTotalCredits(displayGrades, allSubjects);
-    final subjectsPassed = displayGrades.where((g) => g.isPassed && g.isVisible).length;
-    final subjectsFailed = displayGrades.where((g) => !g.isPassed && g.total > 0 && g.isVisible).length;
+    // حساب الإحصائيات
+    final totalCredits = _calculateTotalCredits(studentGrades, allSubjects);
+    final subjectsPassed = studentGrades.where((g) => g.total >= 50).length;
+    final subjectsFailed =
+        studentGrades.where((g) => g.total < 50 && g.total > 0).length;
 
-    // تحديد عنوان GPA للعرض
-    final gpaLabel = _selectedSemester == 0 ? 'GPA' : 'Sem $_selectedSemester GPA';
+    // حساب Semester GPA و Cumulative GPA
+    final semester1Grades = studentGrades.where((g) => g.semester == 1).toList();
+    final semester2Grades = studentGrades.where((g) => g.semester == 2).toList();
+    
+    final semester1GPA = _calculateGPA(semester1Grades, allSubjects);
+    final semester2GPA = _calculateGPA(semester2Grades, allSubjects);
+    final cumulativeGPA = _calculateGPA(studentGrades, allSubjects);
+
+    // تحديد أي سيمستر نعرض
+    final semesterToShow = _selectedSemester == 1 ? 1 : (_selectedSemester == 2 ? 2 : 1);
+    final displaySemesterGPA = semesterToShow == 1 ? semester1GPA : semester2GPA;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -82,7 +92,7 @@ class _StudentGradesState extends State<StudentGrades> {
             backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           ),
 
-          // Stats Cards
+          // Stats Cards - increased height
           SliverPadding(
             padding: const EdgeInsets.all(16),
             sliver: SliverGrid(
@@ -90,31 +100,31 @@ class _StudentGradesState extends State<StudentGrades> {
                 crossAxisCount: 2,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
-                childAspectRatio: 1.4,
+                childAspectRatio: 1.5, // Increased from 1.6 to 1.8
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final stats = [
                     {
-                      'title': gpaLabel,
-                      'value': 'Term: ${filteredGPA.toStringAsFixed(2)}\nCum: ${cumulativeGPA.toStringAsFixed(2)}',
+                      'title': 'GPA',
+                      'value': 'S$semesterToShow: ${displaySemesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
                       'icon': Icons.trending_up,
                       'color': const Color(0xFF8B5CF6)
                     },
                     {
-                      'title': 'Credits (Selected)',
+                      'title': 'Total Credits',
                       'value': totalCredits.toString(),
                       'icon': Icons.credit_card,
                       'color': const Color(0xFF10B981)
                     },
                     {
-                      'title': 'Passed',
+                      'title': 'Subjects Passed',
                       'value': subjectsPassed.toString(),
                       'icon': Icons.check_circle,
                       'color': const Color(0xFF34D399)
                     },
                     {
-                      'title': 'Failed',
+                      'title': 'Subjects Failed',
                       'value': subjectsFailed.toString(),
                       'icon': Icons.cancel,
                       'color': const Color(0xFFF87171)
@@ -221,7 +231,7 @@ class _StudentGradesState extends State<StudentGrades> {
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
           // Grades Table
-          if (displayGrades.isEmpty)
+          if (studentGrades.isEmpty)
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.all(16),
@@ -245,7 +255,7 @@ class _StudentGradesState extends State<StudentGrades> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(
-                  displayGrades.map((grade) => _buildGradeCard(grade, allSubjects)).toList(),
+                  studentGrades.map((grade) => _buildGradeCard(grade, allSubjects)).toList(),
                 ),
               ),
             ),
@@ -273,29 +283,60 @@ class _StudentGradesState extends State<StudentGrades> {
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Icon(icon, color: color, size: 24),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: title == 'GPA' ? 16 : 24,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            if (title == 'GPA')
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: value.split('\n').map((line) {
+                  final isCumulative = line.startsWith('C');
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 1),
+                    child: Row(
+                      children: [
+                        if (isCumulative) ...[
+                          Container(
+                            width: 3,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(1.5),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          line,
+                          style: TextStyle(
+                            fontSize: isCumulative ? 12 : 16,
+                            fontWeight: FontWeight.bold,
+                            color: color,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              )
+            else
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: title == 'Total Credits' ? 22 : 18,
+                  fontWeight: FontWeight.bold,
+                  color: color,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                ),
-              ],
+              ),
+            const SizedBox(height: 2),
+            Text(
+              title,
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
             ),
           ],
         ),
@@ -309,9 +350,9 @@ class _StudentGradesState extends State<StudentGrades> {
       orElse: () => subjects.first,
     );
     final percentage = grade.total;
-    final gradeLetter = grade.letterGrade;
-    final gradeColor = grade.gradeColor;
-    final isPassed = grade.isPassed;
+    final gradeLetter = _gradeToLetter(percentage);
+    final gradeColor = _getGradeColor(gradeLetter);
+    final isPassed = grade.total >= 50;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -330,40 +371,40 @@ class _StudentGradesState extends State<StudentGrades> {
               child: Row(
                 children: [
                   Container(
-                    width: 70,
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    width: 60,
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     decoration: BoxDecoration(
                       color: gradeColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       subject.code ?? 'N/A',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: gradeColor),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: gradeColor),
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           grade.subjectName,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           subject.doctorName,
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           'Level ${grade.level} • Semester ${grade.semester}',
-                          style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+                          style: TextStyle(fontSize: 8, color: Colors.grey.shade500),
                         ),
                       ],
                     ),
@@ -371,34 +412,34 @@ class _StudentGradesState extends State<StudentGrades> {
                   Row(
                     children: [
                       Container(
-                        width: 50,
-                        height: 50,
+                        width: 45,
+                        height: 45,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(colors: [gradeColor, gradeColor.withValues(alpha: 0.7)]),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Center(
                           child: Text(
                             grade.total.toInt().toString(),
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: gradeColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(16),
                         ),
                         child: Row(
                           children: [
                             Text(
                               gradeLetter,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: gradeColor),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: gradeColor),
                             ),
-                            const SizedBox(width: 4),
-                            Icon(Icons.chevron_right, size: 16, color: gradeColor),
+                            const SizedBox(width: 2),
+                            Icon(Icons.chevron_right, size: 14, color: gradeColor),
                           ],
                         ),
                       ),
@@ -409,40 +450,40 @@ class _StudentGradesState extends State<StudentGrades> {
             ),
           ),
           Container(
-            height: 4,
+            height: 3,
             margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(1.5),
               color: isPassed ? Colors.green.withValues(alpha: 0.2) : Colors.red.withValues(alpha: 0.2),
             ),
             child: FractionallySizedBox(
               widthFactor: percentage / 100,
               child: Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(1.5),
                   color: isPassed ? Colors.green : Colors.red,
                 ),
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   '${percentage.toInt()}%',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: gradeColor),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: gradeColor),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: isPassed ? Colors.green.withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     isPassed ? 'PASS' : 'FAIL',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isPassed ? Colors.green : Colors.red),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isPassed ? Colors.green : Colors.red),
                   ),
                 ),
               ],
@@ -598,7 +639,7 @@ class _StudentGradesState extends State<StudentGrades> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: grade.gradeColor.withValues(alpha: 0.1),
+                        color: _getGradeColor(_gradeToLetter(grade.total)).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -608,11 +649,11 @@ class _StudentGradesState extends State<StudentGrades> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
-                              color: grade.gradeColor,
+                              color: _getGradeColor(_gradeToLetter(grade.total)),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              grade.letterGrade,
+                              _gradeToLetter(grade.total),
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                             ),
                           ),
@@ -679,7 +720,7 @@ class _StudentGradesState extends State<StudentGrades> {
     );
   }
 
-  // ✅ حساب GPA حسب النظام الجديد
+  // ✅ حساب GPA
   double _calculateGPA(List<Grade> grades, List<Subject> subjects) {
     if (grades.isEmpty) return 0.0;
 
@@ -694,21 +735,62 @@ class _StudentGradesState extends State<StudentGrades> {
         orElse: () => subjects.first,
       );
       final credits = subject.totalCreditHours;
-
-      // استخدام خصائص النموذج مباشرة لتبسيط الحساب
-      double gradePoint = grade.gradePoints;
+      final gradePoint = _gradeToPoints(grade.total);
 
       totalPoints += gradePoint * credits;
       totalCredits += credits;
     }
-
+    
     return totalCredits > 0 ? (totalPoints / totalCredits) : 0.0;
+  }
+
+  // ✅ تحويل النسبة إلى Grade Points (4.0 scale)
+  double _gradeToPoints(double percentage) {
+    if (percentage >= 95) return 4.0;   // A+
+    if (percentage >= 90) return 4.0;   // A
+    if (percentage >= 85) return 3.7;   // A-
+    if (percentage >= 80) return 3.5;   // B+
+    if (percentage >= 75) return 3.0;   // B
+    if (percentage >= 70) return 2.7;   // B-
+    if (percentage >= 65) return 2.5;   // C+
+    if (percentage >= 60) return 2.3;   // C
+    if (percentage >= 55) return 2.0;   // C-
+    if (percentage >= 53) return 1.7;   // D+
+    if (percentage >= 51) return 1.3;   // D
+    if (percentage >= 50) return 1.0;   // D-
+    return 0.0;                          // F
+  }
+
+  // ✅ تحويل النسبة إلى Grade Letter
+  String _gradeToLetter(double percentage) {
+    if (percentage >= 95) return 'A+';
+    if (percentage >= 90) return 'A';
+    if (percentage >= 85) return 'A-';
+    if (percentage >= 80) return 'B+';
+    if (percentage >= 75) return 'B';
+    if (percentage >= 70) return 'B-';
+    if (percentage >= 65) return 'C+';
+    if (percentage >= 60) return 'C';
+    if (percentage >= 55) return 'C-';
+    if (percentage >= 53) return 'D+';
+    if (percentage >= 51) return 'D';
+    if (percentage >= 50) return 'D-';
+    return 'F';
+  }
+
+  // ✅ ألوان التقديرات حسب الحرف
+  Color _getGradeColor(String gradeLetter) {
+    if (gradeLetter.startsWith('A')) return const Color(0xFF34D399);
+    if (gradeLetter.startsWith('B')) return const Color(0xFF60A5FA);
+    if (gradeLetter.startsWith('C')) return const Color(0xFFFBBF24);
+    if (gradeLetter.startsWith('D')) return const Color(0xFFF97316);
+    return const Color(0xFFF87171);
   }
 
   int _calculateTotalCredits(List<Grade> grades, List<Subject> subjects) {
     int total = 0;
     for (final grade in grades) {
-      if (grade.isPassed && grade.isVisible) {
+      if (grade.total >= 50 && grade.isVisible) {
         final subject = subjects.firstWhere(
           (s) => s.id == grade.subjectId,
           orElse: () => subjects.first,
