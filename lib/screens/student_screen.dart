@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
+import '../cubit/theme/theme_cubit.dart';
 import '../widgets/settings_bottom_sheet.dart';
 import 'sections/student/student_overview.dart';
 import 'sections/student/student_schedule.dart';
@@ -48,8 +49,9 @@ class _StudentScreenState extends State<StudentScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
+    final themeCubit = context.watch<ThemeCubit>();
     final student = authState.user;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
 
     if (student == null) {
       return const Scaffold(
@@ -78,9 +80,10 @@ class _StudentScreenState extends State<StudentScreen> {
           ),
         ),
         actions: [
+          // 🔔 Notifications
           IconButton(
             icon: Icon(Icons.notifications_none_rounded,
-                color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                color: Theme.of(context).hintColor),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -90,6 +93,8 @@ class _StudentScreenState extends State<StudentScreen> {
               );
             },
           ),
+          // 🌙☀️ Animated Theme Toggle Button
+          _buildAnimatedThemeToggle(isDarkMode),
         ],
       ),
       drawer: _buildDrawer(context, student),
@@ -117,9 +122,9 @@ class _StudentScreenState extends State<StudentScreen> {
                 _selectedIndex = index;
               });
             },
-            backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            backgroundColor: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
             selectedItemColor: const Color(0xFF8B5CF6),
-            unselectedItemColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            unselectedItemColor: Theme.of(context).hintColor,
             selectedLabelStyle: const TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 12,
@@ -130,6 +135,55 @@ class _StudentScreenState extends State<StudentScreen> {
             ),
             elevation: 0,
             items: _navItems,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ زر تبديل الثيم المتحرك والجذاب
+  Widget _buildAnimatedThemeToggle(bool isDarkMode) {
+    return GestureDetector(
+      onTap: () {
+        context.read<ThemeCubit>().toggleTheme();
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        transitionBuilder: (Widget child, Animation<double> animation) {
+          return RotationTransition(
+            turns: animation,
+            child: ScaleTransition(
+              scale: animation,
+              child: child,
+            ),
+          );
+        },
+        child: Container(
+          key: ValueKey<bool>(isDarkMode),
+          margin: const EdgeInsets.only(right: 8),
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDarkMode
+                  ? [Colors.amber.shade300, Colors.orange.shade400]
+                  : [Colors.indigo.shade400, Colors.purple.shade400],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: (isDarkMode ? Colors.amber : Colors.purple).withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Icon(
+            isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
+            color: Colors.white,
+            size: 24,
           ),
         ),
       ),

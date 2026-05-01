@@ -14,6 +14,7 @@ class Grade {
   final double practical;
   final double attendance;
   final double assignment;
+  final double finalExam;
   final double total;
   final int semester;
   final String academicYear;
@@ -33,6 +34,7 @@ class Grade {
     required this.practical,
     required this.attendance,
     required this.assignment,
+    required this.finalExam,
     required this.total,
     required this.semester,
     required this.academicYear,
@@ -54,6 +56,7 @@ class Grade {
       practical: (json['practical'] ?? 0).toDouble(),
       attendance: (json['attendance'] ?? 0).toDouble(),
       assignment: (json['assignment'] ?? 0).toDouble(),
+      finalExam: (json['final_exam'] ?? json['final'] ?? 0).toDouble(),
       total: (json['total'] ?? 0).toDouble(),
       semester: json['semester'] ?? 1,
       academicYear: json['academic_year'] ?? '',

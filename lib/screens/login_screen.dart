@@ -19,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isStudentLogin = true;
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -27,14 +28,23 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _handleLogin() {
+  Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    context.read<AuthCubit>().login(
+    setState(() => _isLoading = true);
+
+    if (!mounted) return;
+    final authCubit = context.read<AuthCubit>();
+    
+    await authCubit.login(
           username: _usernameController.text.trim(),
           password: _passwordController.text,
           isStudent: _isStudentLogin,
         );
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -42,335 +52,451 @@ class _LoginScreenState extends State<LoginScreen> {
     return BlocListener<AuthCubit, AuthState>(
       listener: (context, state) async {
         if (state.loadingState.hasError) {
-          ErrorHandler.showErrorSnackBar(
-            context,
-            state.loadingState.errorMessage ?? 'Login failed',
-          );
-        } else if (state.isAuthenticated && state.user != null) {
-          // Store values from context before async operations
+          if (context.mounted) {
+            setState(() => _isLoading = false);
+            ErrorHandler.showErrorSnackBar(
+              context,
+              state.loadingState.errorMessage ?? 'Login failed',
+            );
+          }
+          return;
+        }
+
+        // ✅ معالجة النجاح
+        if (state.isAuthenticated && state.user != null) {
           final dataCubit = context.read<DataCubit>();
           final userName = state.user?.name ?? "User";
-          final messenger = ScaffoldMessenger.of(context);
 
-          // جلب البيانات بعد نجاح الدخول
+          // جلب البيانات الأساسية
           await dataCubit.loadAllData();
 
-          // ✅ جلب الدرجات للطالب إذا كان طالب
-          if (!state.user!.isDoctor &&
-              state.user != null &&
-              state.token != null) {
+          // جلب الدرجات للطالب
+          if (!state.user!.isDoctor && state.user != null && state.token != null) {
             final studentId = state.user!.id;
             final token = state.token!;
-            print('📊 Loading grades for student ID: $studentId');
             await dataCubit.loadStudentGradesWithToken(studentId, token);
             await dataCubit.checkGradesStatus(studentId, token);
           }
 
-          // ✅ التأكد من حفظ التوكن في ApiService
-          if (state.token != null && state.token!.isNotEmpty) {
-            print('🔑 Token saved in ApiService after login');
+          // ✅ التحقق من context.mounted بعد العمليات غير المتزامنة
+          if (context.mounted) {
+            ErrorHandler.showSuccessSnackBar(context, 'Welcome $userName!');
           }
-
-          // Use pre-stored messenger instead of context
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('Welcome $userName!'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
         }
       },
       child: Scaffold(
         body: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+              colors: [
+                Theme.of(context).scaffoldBackgroundColor,
+                Theme.of(context).primaryColor.withValues(alpha: 0.1),
+              ],
             ),
           ),
           child: SafeArea(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 40),
-
-                  // Logo
-                  Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+            child: Center(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Hero Logo مع أنيميشن
+                    TweenAnimationBuilder(
+                      tween: Tween<double>(begin: 0, end: 1),
+                      duration: const Duration(milliseconds: 800),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, child) {
+                        return Transform.scale(
+                          scale: value,
+                          child: child,
+                        );
+                      },
+                      child: Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Theme.of(context).primaryColor,
+                              const Color(0xFF0EA5E9),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(28),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context).primaryColor.withValues(alpha: 0.4),
+                              blurRadius: 30,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _isStudentLogin ? Icons.school_rounded : Icons.medical_services_rounded,
+                          size: 48,
+                          color: Colors.white,
+                        ),
                       ),
-                      borderRadius: BorderRadius.circular(24),
                     ),
-                    child: Icon(
-                      _isStudentLogin ? Icons.school : Icons.medical_services,
-                      size: 45,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 32),
 
-                  Text(
-                    _isStudentLogin ? 'Student Portal' : 'Doctor Portal',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                    // العنوان الرئيسي
+                    ShaderMask(
+                      shaderCallback: (bounds) => LinearGradient(
+                        colors: [
+                          Theme.of(context).primaryColor,
+                          const Color(0xFF0EA5E9),
+                        ],
+                      ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height)),
+                      child: const Text(
+                        'TRAXA',
+                        style: TextStyle(
+                          fontSize: 42,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isStudentLogin
-                        ? 'Access your academic dashboard'
-                        : 'Professional Doctor Dashboard',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF94A3B8),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Academic System',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade600,
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 32),
+                    const SizedBox(height: 40),
 
-                  // Toggle
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(40),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
+                    // Toggle بين Student و Doctor
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Row(
+                        children: [
+                          _buildToggleButton(
+                            isActive: _isStudentLogin,
+                            label: 'Student',
+                            icon: Icons.school_rounded,
                             onTap: () => setState(() => _isStudentLogin = true),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: _isStudentLogin
-                                    ? const Color(0xFF0EA5E9)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(36),
-                              ),
-                              child: const Text(
-                                'Student',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _isStudentLogin = false),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: !_isStudentLogin
-                                    ? const Color(0xFF0EA5E9)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(36),
-                              ),
-                              child: const Text(
-                                'Doctor',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
+                          _buildToggleButton(
+                            isActive: !_isStudentLogin,
+                            label: 'Doctor / TA',
+                            icon: Icons.medical_services_rounded,
+                            onTap: () => setState(() => _isStudentLogin = false),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 32),
+                    const SizedBox(height: 40),
 
-                  // Form
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      children: [
-                        TextFormField(
-                          controller: _usernameController,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 15),
-                          decoration: InputDecoration(
-                            prefixIcon: Icon(
-                              _isStudentLogin ? Icons.badge : Icons.person,
-                              color: const Color(0xFF94A3B8),
-                              size: 20,
-                            ),
-                            hintText:
-                                _isStudentLogin ? 'Student ID' : 'Username',
-                            hintStyle: const TextStyle(
-                                color: Color(0xFF64748B), fontSize: 14),
-                            filled: true,
-                            fillColor: Colors.white.withValues(alpha: 0.05),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                  color: Colors.white.withValues(alpha: 0.2)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide:
-                                  const BorderSide(color: Color(0xFF0EA5E9)),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter ${_isStudentLogin ? "Student ID" : "username"}';
-                            }
-                            return null;
-                          },
+                    // Form Card
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(32),
+                        border: Border.all(
+                          color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
                         ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 15),
-                          decoration: InputDecoration(
-                            prefixIcon: const Icon(Icons.lock,
-                                color: Color(0xFF94A3B8), size: 20),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: const Color(0xFF94A3B8),
-                                size: 20,
-                              ),
-                              onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword),
-                            ),
-                            hintText: 'Password',
-                            hintStyle: const TextStyle(
-                                color: Color(0xFF64748B), fontSize: 14),
-                            filled: true,
-                            fillColor: Colors.white.withValues(alpha: 0.05),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                  color: Colors.white.withValues(alpha: 0.2)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide:
-                                  const BorderSide(color: Color(0xFF0EA5E9)),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter password';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // Login Button
-                  BlocBuilder<AuthCubit, AuthState>(
-                    builder: (context, state) {
-                      return SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: state.loadingState.isLoading
-                              ? null
-                              : _handleLogin,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0EA5E9),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: state.loadingState.isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            children: [
+                              // عنوان الفورم
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 4,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).primaryColor,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
                                   ),
-                                )
-                              : const Text(
-                                  'Login',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _isStudentLogin ? 'Student Portal' : 'Doctor Portal',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context).textTheme.titleLarge?.color,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _isStudentLogin
+                                    ? 'Access your academic dashboard'
+                                    : 'Professional Dashboard for Doctors & TAs',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+
+                              // Username Field
+                              TextFormField(
+                                controller: _usernameController,
+                                style: TextStyle(
+                                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                                  fontSize: 15,
+                                ),
+                                decoration: InputDecoration(
+                                  prefixIcon: Icon(
+                                    _isStudentLogin ? Icons.badge_rounded : Icons.person_rounded,
+                                    color: Theme.of(context).primaryColor,
+                                    size: 20,
+                                  ),
+                                  hintText: _isStudentLogin ? 'Student ID' : 'Username',
+                                  hintStyle: TextStyle(
+                                    color: Theme.of(context).hintColor,
+                                    fontSize: 14,
+                                  ),
+                                  filled: true,
+                                  fillColor: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white.withValues(alpha: 0.05)
+                                      : Colors.grey.shade50,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(
+                                      color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(
+                                      color: Theme.of(context).primaryColor,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
                                   ),
                                 ),
-                        ),
-                      );
-                    },
-                  ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter ${_isStudentLogin ? "Student ID" : "username"}';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
 
-                  const SizedBox(height: 20),
+                              // Password Field
+                              TextFormField(
+                                controller: _passwordController,
+                                obscureText: _obscurePassword,
+                                style: TextStyle(
+                                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                                  fontSize: 15,
+                                ),
+                                decoration: InputDecoration(
+                                  prefixIcon: Icon(
+                                    Icons.lock_rounded,
+                                    color: Theme.of(context).primaryColor,
+                                    size: 20,
+                                  ),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                                      color: Theme.of(context).hintColor,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                  ),
+                                  hintText: 'Password',
+                                  hintStyle: TextStyle(
+                                    color: Theme.of(context).hintColor,
+                                    fontSize: 14,
+                                  ),
+                                  filled: true,
+                                  fillColor: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white.withValues(alpha: 0.05)
+                                      : Colors.grey.shade50,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(
+                                      color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                    borderSide: BorderSide(
+                                      color: Theme.of(context).primaryColor,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter password';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 28),
 
-                  // Info
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0EA5E9).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color:
-                              const Color(0xFF0EA5E9).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline,
-                            color: Color(0xFF0EA5E9), size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _isStudentLogin
-                                ? 'First time login? Use your Student ID as password (last 4 digits)'
-                                : 'Enter your doctor username and password',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF94A3B8),
-                            ),
+                              // Login Button
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: double.infinity,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Theme.of(context).primaryColor,
+                                      const Color(0xFF0EA5E9),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: _isLoading
+                                      ? []
+                                      : [
+                                          BoxShadow(
+                                            color: Theme.of(context).primaryColor.withValues(alpha: 0.4),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                ),
+                                child: ElevatedButton(
+                                  onPressed: _isLoading ? null : _handleLogin,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    shadowColor: Colors.transparent,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  child: _isLoading
+                                      ? SizedBox(
+                                          height: 24,
+                                          width: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              'Login',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            SizedBox(width: 8),
+                                            Icon(
+                                              Icons.arrow_forward_rounded,
+                                              size: 18,
+                                              color: Colors.white,
+                                            ),
+                                          ],
+                                        ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
 
-                  const SizedBox(height: 20),
-                ],
+
+                  ],
+                ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleButton({
+    required bool isActive,
+    required String label,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isActive
+                ? Theme.of(context).primaryColor
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isActive
+                    ? Colors.white
+                    : (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.grey.shade500
+                        : Colors.grey.shade600),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: isActive
+                      ? Colors.white
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade600),
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -50,7 +50,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
+    final themeCubit = context.watch<ThemeCubit>();
     final doctor = authState.user;
+    final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // البحث عن الإيميل من بيانات الدكتور
@@ -90,6 +92,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
           ),
         ),
         actions: [
+          // 🔔 Notifications
           IconButton(
             icon: Icon(Icons.notifications_none_rounded,
                 color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
@@ -102,13 +105,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
               );
             },
           ),
-          IconButton(
-            icon: Icon(Icons.brightness_6_rounded,
-                color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-            onPressed: () {
-              context.read<ThemeCubit>().toggleTheme();
-            },
-          ),
+          // 🌙☀️ Animated Theme Toggle Button
+          _buildAnimatedThemeToggle(isDarkMode),
         ],
       ),
       drawer: _buildDrawer(context, doctor, doctorEmail),
@@ -149,6 +147,57 @@ class _DoctorScreenState extends State<DoctorScreen> {
             ),
             elevation: 0,
             items: _navItems,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ زر تبديل الثيم المتحرك والجذاب (بنفس ألوان الدكتور - أزرق)
+  Widget _buildAnimatedThemeToggle(bool isDarkMode) {
+    const doctorPrimaryColor = Color(0xFF0EA5E9);
+    
+    return GestureDetector(
+      onTap: () {
+        context.read<ThemeCubit>().toggleTheme();
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        transitionBuilder: (Widget child, Animation<double> animation) {
+          return RotationTransition(
+            turns: animation,
+            child: ScaleTransition(
+              scale: animation,
+              child: child,
+            ),
+          );
+        },
+        child: Container(
+          key: ValueKey<bool>(isDarkMode),
+          margin: const EdgeInsets.only(right: 8),
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDarkMode
+                  ? [Colors.amber.shade300, Colors.orange.shade400]
+                  : [doctorPrimaryColor, doctorPrimaryColor.withValues(alpha: 0.7)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: (isDarkMode ? Colors.amber : doctorPrimaryColor).withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Icon(
+            isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
+            color: Colors.white,
+            size: 24,
           ),
         ),
       ),

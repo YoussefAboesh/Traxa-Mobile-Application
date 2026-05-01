@@ -1,6 +1,6 @@
 class AppConstants {
   // 🔥 لو بتشغل على موبايل حقيقي غيرها لـ IP بتاع السيرفر
-  static const String baseUrl = 'https://192.168.1.30:3443';
+  static const String baseUrl = 'https://192.168.1.35:3443';
 
   // API Endpoints
   static const String loginEndpoint = '/api/login';
