@@ -1,3 +1,4 @@
+// lib/cubit/data/data_state.dart
 import 'package:equatable/equatable.dart';
 import '../../models/student.dart';
 import '../../models/doctor.dart';

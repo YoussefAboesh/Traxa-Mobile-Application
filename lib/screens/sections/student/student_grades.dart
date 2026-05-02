@@ -23,6 +23,13 @@ class _StudentGradesState extends State<StudentGrades> {
   // تخزين توزيعات الدرجات مؤقتاً
   final Map<String, Map<String, double>> _distributionsCache = {};
 
+  // ✅ دالة لتحديد النص حسب الفلتر (S1, S2, أو AS)
+  String getSemesterLabel() {
+    if (_selectedSemester == 1) return 'S1';
+    if (_selectedSemester == 2) return 'S2';
+    return 'AS'; // All Semesters
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
@@ -42,44 +49,39 @@ class _StudentGradesState extends State<StudentGrades> {
     final allSubjects = dataState.subjects;
     final allGrades = dataState.grades;
 
-    // فلترة درجات الطالب
-    List<Grade> studentGrades =
-        allGrades.where((g) => g.studentId == student?.id).toList();
+    // ✅ جميع درجات الطالب (لـ Cumulative GPA)
+    final allStudentGrades = allGrades.where((g) => g.studentId == student?.id).toList();
+    
+    // ✅ الدرجات بعد الفلتر (للعرض فقط ولحساب Semester GPA)
+    List<Grade> filteredGrades = List.from(allStudentGrades);
 
     // فلترة حسب السيمستر
     if (_selectedSemester == 1) {
-      studentGrades = studentGrades.where((g) => g.semester == 1).toList();
+      filteredGrades = filteredGrades.where((g) => g.semester == 1).toList();
     } else if (_selectedSemester == 2) {
-      studentGrades = studentGrades.where((g) => g.semester == 2).toList();
+      filteredGrades = filteredGrades.where((g) => g.semester == 2).toList();
     }
 
     // فلترة حسب المستوى
     if (_selectedLevel != 0) {
-      studentGrades = studentGrades
+      filteredGrades = filteredGrades
           .where((g) => g.level == _selectedLevel)
           .toList();
     }
 
     // ترتيب حسب المادة
-    studentGrades.sort((a, b) => a.subjectName.compareTo(b.subjectName));
+    filteredGrades.sort((a, b) => a.subjectName.compareTo(b.subjectName));
 
-    // حساب الإحصائيات
-    final totalCredits = _calculateTotalCredits(studentGrades, allSubjects);
-    final subjectsPassed = studentGrades.where((g) => g.total >= 50).length;
-    final subjectsFailed =
-        studentGrades.where((g) => g.total < 50 && g.total > 0).length;
+    // ✅ حساب الإحصائيات من الدرجات المفلترة
+    final totalCredits = _calculateTotalCredits(filteredGrades, allSubjects);
+    final subjectsPassed = filteredGrades.where((g) => g.total >= 50).length;
+    final subjectsFailed = filteredGrades.where((g) => g.total < 50 && g.total > 0).length;
 
-    // حساب Semester GPA و Cumulative GPA
-    final semester1Grades = studentGrades.where((g) => g.semester == 1).toList();
-    final semester2Grades = studentGrades.where((g) => g.semester == 2).toList();
+    // ✅ حساب Semester GPA (من الدرجات المفلترة فقط)
+    final semesterGPA = _calculateGPA(filteredGrades, allSubjects);
     
-    final semester1GPA = _calculateGPA(semester1Grades, allSubjects);
-    final semester2GPA = _calculateGPA(semester2Grades, allSubjects);
-    final cumulativeGPA = _calculateGPA(studentGrades, allSubjects);
-
-    // تحديد أي سيمستر نعرض
-    final semesterToShow = _selectedSemester == 1 ? 1 : (_selectedSemester == 2 ? 2 : 1);
-    final displaySemesterGPA = semesterToShow == 1 ? semester1GPA : semester2GPA;
+    // ✅ حساب Cumulative GPA (من جميع الدرجات - ثابت)
+    final cumulativeGPA = _calculateGPA(allStudentGrades, allSubjects);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -92,7 +94,7 @@ class _StudentGradesState extends State<StudentGrades> {
             backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           ),
 
-          // Stats Cards - increased height
+          // Stats Cards
           SliverPadding(
             padding: const EdgeInsets.all(16),
             sliver: SliverGrid(
@@ -100,14 +102,14 @@ class _StudentGradesState extends State<StudentGrades> {
                 crossAxisCount: 2,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
-                childAspectRatio: 1.5, // Increased from 1.6 to 1.8
+                childAspectRatio: 1.6,
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final stats = [
                     {
                       'title': 'GPA',
-                      'value': 'S$semesterToShow: ${displaySemesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
+                      'value': '${getSemesterLabel()}: ${semesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
                       'icon': Icons.trending_up,
                       'color': const Color(0xFF8B5CF6)
                     },
@@ -231,7 +233,7 @@ class _StudentGradesState extends State<StudentGrades> {
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
           // Grades Table
-          if (studentGrades.isEmpty)
+          if (filteredGrades.isEmpty)
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.all(16),
@@ -255,7 +257,7 @@ class _StudentGradesState extends State<StudentGrades> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(
-                  studentGrades.map((grade) => _buildGradeCard(grade, allSubjects)).toList(),
+                  filteredGrades.map((grade) => _buildGradeCard(grade, allSubjects)).toList(),
                 ),
               ),
             ),
@@ -349,17 +351,14 @@ class _StudentGradesState extends State<StudentGrades> {
       (s) => s.id == grade.subjectId,
       orElse: () => subjects.first,
     );
-    final percentage = grade.total;
-    final gradeLetter = _gradeToLetter(percentage);
-    final gradeColor = _getGradeColor(gradeLetter);
-    final isPassed = grade.total >= 50;
+    final isPassed = grade.isPassed;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: gradeColor.withValues(alpha: 0.3)),
+        border: Border.all(color: grade.gradeColor.withValues(alpha: 0.3)),
       ),
       child: Column(
         children: [
@@ -374,12 +373,12 @@ class _StudentGradesState extends State<StudentGrades> {
                     width: 60,
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     decoration: BoxDecoration(
-                      color: gradeColor.withValues(alpha: 0.15),
+                      color: grade.gradeColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       subject.code ?? 'N/A',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: gradeColor),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: grade.gradeColor),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -415,7 +414,7 @@ class _StudentGradesState extends State<StudentGrades> {
                         width: 45,
                         height: 45,
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [gradeColor, gradeColor.withValues(alpha: 0.7)]),
+                          gradient: LinearGradient(colors: [grade.gradeColor, grade.gradeColor.withValues(alpha: 0.7)]),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Center(
@@ -429,17 +428,17 @@ class _StudentGradesState extends State<StudentGrades> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: gradeColor.withValues(alpha: 0.15),
+                          color: grade.gradeColor.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Row(
                           children: [
                             Text(
-                              gradeLetter,
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: gradeColor),
+                              grade.gradeLetter,
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: grade.gradeColor),
                             ),
                             const SizedBox(width: 2),
-                            Icon(Icons.chevron_right, size: 14, color: gradeColor),
+                            Icon(Icons.chevron_right, size: 14, color: grade.gradeColor),
                           ],
                         ),
                       ),
@@ -457,7 +456,7 @@ class _StudentGradesState extends State<StudentGrades> {
               color: isPassed ? Colors.green.withValues(alpha: 0.2) : Colors.red.withValues(alpha: 0.2),
             ),
             child: FractionallySizedBox(
-              widthFactor: percentage / 100,
+              widthFactor: grade.total / 100,
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(1.5),
@@ -472,8 +471,8 @@ class _StudentGradesState extends State<StudentGrades> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '${percentage.toInt()}%',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: gradeColor),
+                  '${grade.total.toInt()}%',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: grade.gradeColor),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -639,7 +638,7 @@ class _StudentGradesState extends State<StudentGrades> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: _getGradeColor(_gradeToLetter(grade.total)).withValues(alpha: 0.1),
+                        color: grade.gradeColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -649,11 +648,11 @@ class _StudentGradesState extends State<StudentGrades> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
-                              color: _getGradeColor(_gradeToLetter(grade.total)),
+                              color: grade.gradeColor,
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              _gradeToLetter(grade.total),
+                              grade.gradeLetter,
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                             ),
                           ),
@@ -720,7 +719,7 @@ class _StudentGradesState extends State<StudentGrades> {
     );
   }
 
-  // ✅ حساب GPA
+  // ✅ حساب GPA باستخدام Grade Points
   double _calculateGPA(List<Grade> grades, List<Subject> subjects) {
     if (grades.isEmpty) return 0.0;
 
@@ -735,56 +734,13 @@ class _StudentGradesState extends State<StudentGrades> {
         orElse: () => subjects.first,
       );
       final credits = subject.totalCreditHours;
-      final gradePoint = _gradeToPoints(grade.total);
+      final gradePoint = grade.gradePoints;
 
       totalPoints += gradePoint * credits;
       totalCredits += credits;
     }
-    
+
     return totalCredits > 0 ? (totalPoints / totalCredits) : 0.0;
-  }
-
-  // ✅ تحويل النسبة إلى Grade Points (4.0 scale)
-  double _gradeToPoints(double percentage) {
-    if (percentage >= 95) return 4.0;   // A+
-    if (percentage >= 90) return 4.0;   // A
-    if (percentage >= 85) return 3.7;   // A-
-    if (percentage >= 80) return 3.5;   // B+
-    if (percentage >= 75) return 3.0;   // B
-    if (percentage >= 70) return 2.7;   // B-
-    if (percentage >= 65) return 2.5;   // C+
-    if (percentage >= 60) return 2.3;   // C
-    if (percentage >= 55) return 2.0;   // C-
-    if (percentage >= 53) return 1.7;   // D+
-    if (percentage >= 51) return 1.3;   // D
-    if (percentage >= 50) return 1.0;   // D-
-    return 0.0;                          // F
-  }
-
-  // ✅ تحويل النسبة إلى Grade Letter
-  String _gradeToLetter(double percentage) {
-    if (percentage >= 95) return 'A+';
-    if (percentage >= 90) return 'A';
-    if (percentage >= 85) return 'A-';
-    if (percentage >= 80) return 'B+';
-    if (percentage >= 75) return 'B';
-    if (percentage >= 70) return 'B-';
-    if (percentage >= 65) return 'C+';
-    if (percentage >= 60) return 'C';
-    if (percentage >= 55) return 'C-';
-    if (percentage >= 53) return 'D+';
-    if (percentage >= 51) return 'D';
-    if (percentage >= 50) return 'D-';
-    return 'F';
-  }
-
-  // ✅ ألوان التقديرات حسب الحرف
-  Color _getGradeColor(String gradeLetter) {
-    if (gradeLetter.startsWith('A')) return const Color(0xFF34D399);
-    if (gradeLetter.startsWith('B')) return const Color(0xFF60A5FA);
-    if (gradeLetter.startsWith('C')) return const Color(0xFFFBBF24);
-    if (gradeLetter.startsWith('D')) return const Color(0xFFF97316);
-    return const Color(0xFFF87171);
   }
 
   int _calculateTotalCredits(List<Grade> grades, List<Subject> subjects) {

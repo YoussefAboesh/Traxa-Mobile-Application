@@ -5,9 +5,35 @@ import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../models/student.dart';
 import '../../../models/grade.dart';
+import '../../../models/subject.dart';
+import '../../../models/lecture.dart';
+import '../../../core/api_service.dart';
 
-class StudentOverview extends StatelessWidget {
+class StudentOverview extends StatefulWidget {
   const StudentOverview({super.key});
+
+  @override
+  State<StudentOverview> createState() => _StudentOverviewState();
+}
+
+class _StudentOverviewState extends State<StudentOverview> {
+  int _currentSemester = 2; // Default Semester 2
+  int _currentLevel = 2;    // Default Level 2
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentAcademicState();
+  }
+  
+  Future<void> _loadCurrentAcademicState() async {
+    final sem = await ApiService.getCurrentSemester();
+    if (mounted) {
+      setState(() {
+        _currentSemester = sem;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,33 +50,59 @@ class StudentOverview extends StatelessWidget {
       );
     }
 
-    final studentSubjects = student != null
-        ? dataState.getSubjectsForStudent(student)
-        : <dynamic>[];
-    final studentLectures = student != null
-        ? dataState.getLecturesForStudent(student)
-        : <dynamic>[];
-    final studentGrades =
-        student != null ? dataState.getGradesForStudent(student.id) : <Grade>[];
+    final studentRef = student; // استخدام مرجع ثابت للـ Null Safety
 
-    // حساب GPA التراكمي (Cumulative)
-    final totalPoints = studentGrades.fold(0.0, (sum, g) => sum + g.total);
-    final totalMaxPoints = studentGrades.length * 100;
-    final cumulativeGPA = studentGrades.isNotEmpty
-        ? ((totalPoints / totalMaxPoints) * 4).toStringAsFixed(2)
-        : '0.0';
+    // ✅ استخدام مستوى الطالب الحالي من قاعدة البيانات
+    final currentStudentLevel = studentRef?.level ?? 2;
+    
+    // ✅ تحديث المستوى الحالي بناءً على الطالب
+    if (_currentLevel != currentStudentLevel) {
+      _currentLevel = currentStudentLevel;
+    }
 
-    // حساب Semester GPA (لأخر ترم)
-    final semesterGrades = studentGrades.where((g) => g.semester == 1).toList();
-    final semPoints = semesterGrades.fold(0.0, (sum, g) => sum + g.total);
-    final semMaxPoints = semesterGrades.length * 100;
-    final semesterGPA = semesterGrades.isNotEmpty
-        ? ((semPoints / semMaxPoints) * 4).toStringAsFixed(2)
-        : '0.0';
+    final allSubjects = dataState.subjects;
+    final allGrades = dataState.grades;
+    
+    // ✅ جميع درجات الطالب المرئية
+    final allVisibleGrades = allGrades
+        .where((g) => g.studentId == studentRef?.id && g.isVisible)
+        .toList();
+    
+    // ✅ درجات المستوى الحالي - الترم الحالي فقط (لـ Semester GPA)
+    final currentLevelCurrentSemesterGrades = allVisibleGrades
+        .where((g) => g.level == _currentLevel && g.semester == _currentSemester)
+        .toList();
+    
+    // ✅ المواد الدراسية للطالب (المقررة حسب مستواه)
+    final studentSubjects = studentRef != null
+        ? dataState.subjects.where((s) => 
+            s.level == studentRef.level && 
+            s.department == studentRef.department
+          ).toList()
+        : <Subject>[];
+    
+    // ✅ المحاضرات للطالب
+    final studentLectures = studentRef != null
+        ? dataState.lectures.where((l) => 
+            l.level == studentRef.level && 
+            l.department == studentRef.department
+          ).toList()
+        : <Lecture>[];
+    
+    // ✅ حساب Semester GPA (من درجات المستوى الحالي - الترم الحالي فقط)
+    final semesterGPA = _calculateGPA(currentLevelCurrentSemesterGrades, allSubjects);
+    
+    // ✅ حساب Cumulative GPA (من كل الدرجات المرئية)
+    final cumulativeGPA = _calculateGPA(allVisibleGrades, allSubjects);
+    
+    // ✅ درجات آخر ترم (للـ Recent Grades)
+    final recentGrades = currentLevelCurrentSemesterGrades
+      ..sort((a, b) => b.total.compareTo(a.total));
 
     final todayName = _getTodayDayName();
-    final todaysLectures =
-        studentLectures.where((l) => l.day == todayName).toList();
+    final todaysLectures = studentLectures
+        .where((l) => l.day == todayName)
+        .toList();
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -107,7 +159,7 @@ class StudentOverview extends StatelessWidget {
             ),
           ),
 
-          // Bento Grid - 4 cards using SliverGrid
+          // Bento Grid - 4 cards (Total Subjects, Total Lectures, Semester GPA, Cumulative GPA)
           SliverPadding(
             padding: const EdgeInsets.all(16),
             sliver: SliverGrid(
@@ -134,14 +186,15 @@ class StudentOverview extends StatelessWidget {
                     ),
                     BentoItem(
                       title: 'Semester GPA',
-                      value: semesterGPA,
+                      value: semesterGPA.toStringAsFixed(2),
+                      subtitle: 'Semester $_currentSemester',
                       icon: Icons.trending_up,
                       gradientColors: [const Color(0xFF10B981), const Color(0xFF059669)],
                     ),
                     BentoItem(
-                      title: 'GPA',
-                      value: cumulativeGPA,
-                      subtitle: 'Cumulative',
+                      title: 'Cumulative GPA',
+                      value: cumulativeGPA.toStringAsFixed(2),
+                      subtitle: 'Overall',
                       icon: Icons.grade,
                       gradientColors: [const Color(0xFFF59E0B), const Color(0xFFD97706)],
                     ),
@@ -213,7 +266,7 @@ class StudentOverview extends StatelessWidget {
             ),
           ),
 
-          // Recent Grades
+          // Recent Grades (آخر ترم فقط)
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.all(16),
@@ -243,7 +296,7 @@ class StudentOverview extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'Recent Grades',
+                          'Recent Grades (Semester $_currentSemester)',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontSize: 15,
                           ),
@@ -252,18 +305,18 @@ class StudentOverview extends StatelessWidget {
                     ),
                   ),
                   const Divider(height: 1, color: Colors.white10),
-                  if (studentGrades.isEmpty)
+                  if (recentGrades.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 30),
                       child: Center(
                         child: Text(
-                          'No grades published yet',
+                          'No grades published yet for this semester',
                           style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                         ),
                       ),
                     )
                   else
-                    ...studentGrades.take(5).map((grade) => Padding(
+                    ...recentGrades.take(5).map((grade) => Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       child: _buildGradeItem(grade),
                     )),
@@ -273,11 +326,32 @@ class StudentOverview extends StatelessWidget {
             ),
           ),
           
-          // Extra bottom padding for smooth scrolling
           const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
         ],
       ),
     );
+  }
+
+  // ✅ حساب GPA باستخدام Grade Points
+  double _calculateGPA(List<Grade> grades, List<Subject> subjects) {
+    if (grades.isEmpty) return 0.0;
+
+    double totalPoints = 0;
+    int totalCredits = 0;
+
+    for (final grade in grades) {
+      final subject = subjects.firstWhere(
+        (s) => s.id == grade.subjectId,
+        orElse: () => subjects.first,
+      );
+      final credits = subject.totalCreditHours;
+      final gradePoint = grade.gradePoints;
+
+      totalPoints += gradePoint * credits;
+      totalCredits += credits;
+    }
+
+    return totalCredits > 0 ? (totalPoints / totalCredits) : 0.0;
   }
 
   Widget _buildBentoCard(BentoItem item) {
@@ -348,7 +422,7 @@ class StudentOverview extends StatelessWidget {
     );
   }
 
-  Widget _buildLectureItem(dynamic lecture, BuildContext context) {
+  Widget _buildLectureItem(Lecture lecture, BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -415,7 +489,7 @@ class StudentOverview extends StatelessWidget {
   }
 
   Widget _buildGradeItem(Grade grade) {
-    final percentage = (grade.total / 100) * 100;
+    final percentage = grade.total;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -435,7 +509,7 @@ class StudentOverview extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${grade.total.toInt()} / 100',
+                  '${grade.total.toInt()} / 100 - ${grade.gradeLetter}',
                   style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
                 ),
               ],

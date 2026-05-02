@@ -19,8 +19,7 @@ class ApiService {
       _token = prefs.getString(AppConstants.tokenKey);
 
       if (_token != null) {
-        print(
-            '🔑 Token loaded from SharedPreferences: ${_token!.substring(0, 20)}...');
+        print('🔑 Token loaded from SharedPreferences: ${_token!.substring(0, 20)}...');
       } else {
         print('🔑 No token found in SharedPreferences');
       }
@@ -41,8 +40,7 @@ class ApiService {
 
       if (token != null && token.isNotEmpty) {
         await prefs.setString(AppConstants.tokenKey, token);
-        print(
-            '🔑 Token saved to SharedPreferences: ${token.substring(0, 20)}...');
+        print('🔑 Token saved to SharedPreferences: ${token.substring(0, 20)}...');
       } else {
         await prefs.remove(AppConstants.tokenKey);
         print('🔑 Token removed from SharedPreferences');
@@ -131,8 +129,7 @@ class ApiService {
       print('🔐 Student login attempt: $studentId');
 
       final response = await http.post(
-        Uri.parse(
-            '${AppConstants.baseUrl}${AppConstants.studentLoginEndpoint}'),
+        Uri.parse('${AppConstants.baseUrl}${AppConstants.studentLoginEndpoint}'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'username': studentId,
@@ -200,7 +197,53 @@ class ApiService {
     await clearToken();
   }
 
-  // ================= DATA =================
+  // ================= DATA ENDPOINTS (Public - No Token Required) =================
+
+  static Future<List<dynamic>> getStudentsPublic() async {
+    print('📚 Fetching students (public)...');
+
+    final res = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/api/students-public'),
+    );
+
+    print('   Response status: $res.statusCode');
+    return res.statusCode == 200 ? jsonDecode(res.body) : [];
+  }
+
+  static Future<List<dynamic>> getDoctorsPublic() async {
+    print('👨‍⚕️ Fetching doctors (public)...');
+
+    final res = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/api/doctors-public'),
+    );
+
+    print('   Response status: $res.statusCode');
+    return res.statusCode == 200 ? jsonDecode(res.body) : [];
+  }
+
+  static Future<List<dynamic>> getSubjectsPublic() async {
+    print('📖 Fetching subjects (public)...');
+
+    final res = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/api/subjects-public'),
+    );
+
+    print('   Response status: $res.statusCode');
+    return res.statusCode == 200 ? jsonDecode(res.body) : [];
+  }
+
+  static Future<List<dynamic>> getLecturesPublic() async {
+    print('🎓 Fetching lectures (public)...');
+
+    final res = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/api/lectures-public'),
+    );
+
+    print('   Response status: ${res.statusCode}');
+    return res.statusCode == 200 ? jsonDecode(res.body) : [];
+  }
+
+  // ================= DATA ENDPOINTS (Authenticated) =================
 
   static Future<List<dynamic>> getStudents() async {
     print('📚 Fetching students...');
@@ -260,8 +303,7 @@ class ApiService {
       print('   Token available: $hasValidToken');
 
       final response = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}${AppConstants.lecturesEndpoint}?semester=$semester'),
+        Uri.parse('${AppConstants.baseUrl}${AppConstants.lecturesEndpoint}?semester=$semester'),
         headers: _headers,
       );
 
@@ -302,13 +344,14 @@ class ApiService {
     return res.statusCode == 200 ? jsonDecode(res.body) : [];
   }
 
+  // ================= GRADES ENDPOINTS =================
+
   static Future<List<dynamic>> getStudentGrades(int studentId) async {
     print('📊 Fetching grades for student $studentId...');
     print('   Token available: $hasValidToken');
 
     final res = await http.get(
-      Uri.parse(
-          '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
+      Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
       headers: _headers,
     );
 
@@ -322,8 +365,7 @@ class ApiService {
       print('📊 Fetching grades for student $studentId with provided token');
 
       final response = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
+        Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -348,8 +390,7 @@ class ApiService {
       int studentId, String token) async {
     try {
       final response = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/debug'),
+        Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/debug'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -372,8 +413,7 @@ class ApiService {
       int doctorId, int subjectId, String token) async {
     try {
       final response = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}/api/grade-distributions/$doctorId/$subjectId'),
+        Uri.parse('${AppConstants.baseUrl}/api/grade-distributions/$doctorId/$subjectId'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -412,8 +452,7 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print(
-            '✅ QR Code loaded for student: ${data['qrCode']?['student_name'] ?? studentId}');
+        print('✅ QR Code loaded for student: ${data['qrCode']?['student_name'] ?? studentId}');
         return data;
       } else {
         return {'success': false, 'error': 'Failed to get QR code'};
@@ -510,14 +549,121 @@ class ApiService {
     }
   }
 
+  // ================= ACADEMIC ENDPOINTS =================
+
+  static Future<Map<String, dynamic>> getAcademicSettings(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/academic/settings'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {};
+    } catch (e) {
+      print('Error fetching academic settings: $e');
+      return {};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getStudentEnrollmentStatus(
+      int studentId, String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/enrollment/status/$studentId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {};
+    } catch (e) {
+      print('Error fetching enrollment status: $e');
+      return {};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getAvailableSubjectsForEnrollment(
+      int studentId, int semester, String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/enrollment/available/$studentId/$semester'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {};
+    } catch (e) {
+      print('Error fetching available subjects: $e');
+      return {};
+    }
+  }
+
+  static Future<Map<String, dynamic>> registerForSubject(
+      Map<String, dynamic> enrollmentData, String token) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/enrollment/register'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(enrollmentData),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {'success': false, 'error': 'Registration failed'};
+    } catch (e) {
+      print('Error registering for subject: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  static Future<Map<String, dynamic>> dropSubject(
+      Map<String, dynamic> dropData, String token) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('${AppConstants.baseUrl}/api/enrollment/drop'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(dropData),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {'success': false, 'error': 'Drop failed'};
+    } catch (e) {
+      print('Error dropping subject: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   // ================= MOBILE UPDATES (SSE / Polling) =================
 
   static Future<Map<String, dynamic>> checkForMobileUpdates(
       String token, int lastTimestamp) async {
     try {
       final response = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
+        Uri.parse('${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

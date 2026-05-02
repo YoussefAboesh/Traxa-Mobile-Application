@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:io';
@@ -24,10 +25,8 @@ class MyHttpOverrides extends HttpOverrides {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // ✅ تهيئة التوكن قبل تشغيل التطبيق (لحل مشكلة فقدان التوكن بعد إعادة التشغيل)
   await ApiService.initToken();
   
-  // تطبيق الـ Override
   HttpOverrides.global = MyHttpOverrides();
   
   runApp(const MyApp());
