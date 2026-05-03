@@ -1,12 +1,19 @@
 // lib/screens/sections/student/student_profile.dart
+// ✅ Fixes:
+//   1. QR Code — الـ API بترجع الداتا في qrCode.encoded/raw مش qr_data
+//   2. صورة البروفايل — take photo / choose from gallery / view photo
+//   3. orElse fix
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
-import '../../../models/student.dart';
 import '../../../widgets/toast_message.dart';
 import '../../../core/api_service.dart';
+import '../../../core/helpers.dart';
 
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});
@@ -31,6 +38,16 @@ class _StudentProfileState extends State<StudentProfile> {
   String? _qrCodeData;
   bool _isLoadingQR = false;
 
+  // Profile Image
+  String? _profileImagePath;
+  final ImagePicker _imagePicker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedProfileImage();
+  }
+
   @override
   void dispose() {
     _currentPasswordController.dispose();
@@ -39,55 +56,265 @@ class _StudentProfileState extends State<StudentProfile> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    if (!mounted) return;
-    ToastMessage.showError(context, 'Profile image upload coming soon!');
+  // ============================================
+  // Profile Image Methods
+  // ============================================
+
+  Future<void> _loadSavedProfileImage() async {
+    final prefs = await SharedPreferences.getInstance();
+    // ignore: use_build_context_synchronously
+    final authState = context.read<AuthCubit>().state;
+    final key = 'profile_image_${authState.user?.id ?? 0}';
+    final savedPath = prefs.getString(key);
+    if (savedPath != null && File(savedPath).existsSync() && mounted) {
+      setState(() => _profileImagePath = savedPath);
+    }
   }
 
+  Future<void> _saveProfileImagePath(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    // ignore: use_build_context_synchronously
+    final authState = context.read<AuthCubit>().state;
+    final key = 'profile_image_${authState.user?.id ?? 0}';
+    await prefs.setString(key, path);
+  }
+
+  void _showImageOptions() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              Text(
+                'Profile Photo',
+                style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Take Photo
+              _buildImageOptionTile(
+                icon: Icons.camera_alt_rounded,
+                label: 'Take Photo',
+                color: const Color(0xFF0EA5E9),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+
+              // Choose from Gallery
+              _buildImageOptionTile(
+                icon: Icons.photo_library_rounded,
+                label: 'Choose Existing Photo',
+                color: const Color(0xFF8B5CF6),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+
+              // View Photo (لو فيه صورة)
+              if (_profileImagePath != null)
+                _buildImageOptionTile(
+                  icon: Icons.zoom_in_rounded,
+                  label: 'View Photo',
+                  color: const Color(0xFF10B981),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _viewPhoto();
+                  },
+                ),
+
+              // Remove Photo (لو فيه صورة)
+              if (_profileImagePath != null)
+                _buildImageOptionTile(
+                  icon: Icons.delete_rounded,
+                  label: 'Remove Photo',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removePhoto();
+                  },
+                ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageOptionTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 22),
+      ),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontSize: 15, fontWeight: FontWeight.w500,
+          color: isDark ? Colors.white : const Color(0xFF1E293B),
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+
+      if (pickedFile != null && mounted) {
+        setState(() => _profileImagePath = pickedFile.path);
+        await _saveProfileImagePath(pickedFile.path);
+        if (mounted) ToastMessage.showSuccess(context, 'Profile photo updated!');
+      }
+    } catch (e) {
+      if (mounted) {
+        ToastMessage.showError(context, 'Failed to pick image: ${e.toString()}');
+      }
+    }
+  }
+
+  void _viewPhoto() {
+    if (_profileImagePath == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _FullScreenPhotoViewer(imagePath: _profileImagePath!),
+      ),
+    );
+  }
+
+  Future<void> _removePhoto() async {
+    final prefs = await SharedPreferences.getInstance();
+    // ignore: use_build_context_synchronously
+    final authState = context.read<AuthCubit>().state;
+    final key = 'profile_image_${authState.user?.id ?? 0}';
+    await prefs.remove(key);
+    if (mounted) {
+      setState(() => _profileImagePath = null);
+      ToastMessage.showInfo(context, 'Profile photo removed');
+    }
+  }
+
+  // ============================================
+  // QR Code — ✅ Fix: قراءة الداتا من الـ structure الصحيح
+  // ============================================
+
+  Future<void> _loadQRCode() async {
+    setState(() => _isLoadingQR = true);
+    try {
+      final authState = context.read<AuthCubit>().state;
+      if (authState.user == null || authState.token == null) {
+        if (mounted) ToastMessage.showError(context, 'Not authenticated');
+        return;
+      }
+
+      final response = await ApiService.getStudentQRCode(
+        authState.user!.id,
+        authState.token!,
+      );
+
+      if (!mounted) return;
+
+      if (response['success'] == true && response['qrCode'] != null) {
+        final qrCode = response['qrCode'];
+
+        // ✅ Fix: الـ API بترجع encoded و raw مباشرة مش جوه qr_data
+        final encodedData = qrCode['encoded'] ?? '';
+        final rawData = qrCode['raw'] ?? '';
+
+        // استخدم encoded لو موجود، وإلا raw
+        final qrData = encodedData.isNotEmpty ? encodedData : rawData;
+
+        if (qrData.isNotEmpty) {
+          setState(() {
+            _qrCodeData = qrData;
+            _showQRCode = true;
+          });
+        } else {
+          ToastMessage.showError(context, 'QR code data is empty');
+        }
+      } else {
+        final error = response['error'] ?? 'Failed to load QR code';
+        ToastMessage.showError(context, error);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ToastMessage.showError(context, 'Error: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoadingQR = false);
+    }
+  }
+
+  // ============================================
+  // Change Password
+  // ============================================
+
   Future<void> _changePassword() async {
-    // التحقق من تطابق كلمة المرور الجديدة
     if (_newPasswordController.text != _confirmPasswordController.text) {
       ToastMessage.showError(context, 'New passwords do not match');
       return;
     }
-
-    // التحقق من طول كلمة المرور
     if (_newPasswordController.text.length < 4) {
       ToastMessage.showError(context, 'Password must be at least 4 characters');
       return;
     }
 
-    // التحقق من أن كلمة المرور الحالية غير فارغة
-    if (_currentPasswordController.text.isEmpty) {
-      ToastMessage.showError(context, 'Please enter current password');
-      return;
-    }
-
-    setState(() {
-      _isChangingPassword = true;
-    });
+    setState(() => _isChangingPassword = true);
 
     try {
       final authState = context.read<AuthCubit>().state;
       final dataState = context.read<DataCubit>().state;
       final token = authState.token;
 
-      // البحث عن الطالب للحصول على الـ student_id الصحيح
-      Student? student;
-      if (authState.user != null && dataState.students.isNotEmpty) {
-        student = dataState.students.firstWhere(
-          (s) =>
-              s.id == authState.user!.id ||
-              s.studentId == authState.user!.username,
-          orElse: () => dataState.students.first,
-        );
-      }
+      final student = (authState.user != null)
+          ? findStudentSafely(
+              userId: authState.user!.id,
+              username: authState.user!.username,
+              students: dataState.students,
+            )
+          : null;
 
       final studentId = student?.studentId ?? authState.user?.username ?? '';
-
-      print('🔐 Attempting password change...');
-      print('   Student ID: $studentId');
-      print('   Token exists: ${token != null}');
 
       if (studentId.isEmpty || token == null) {
         if (!mounted) return;
@@ -96,92 +323,42 @@ class _StudentProfileState extends State<StudentProfile> {
       }
 
       final response = await ApiService.changeStudentPassword(
-          studentId, _newPasswordController.text, token);
+        studentId, _newPasswordController.text, token,
+      );
 
       if (!mounted) return;
-      print('📥 Response: $response');
 
       if (response['success'] == true) {
-        if (mounted) {
-          ToastMessage.showSuccess(context, 'Password changed successfully!');
-          _currentPasswordController.clear();
-          _newPasswordController.clear();
-          _confirmPasswordController.clear();
-          setState(() {
-            _showPasswordFields = false;
-          });
-        }
+        ToastMessage.showSuccess(context, 'Password changed successfully!');
+        _currentPasswordController.clear();
+        _newPasswordController.clear();
+        _confirmPasswordController.clear();
+        setState(() => _showPasswordFields = false);
       } else {
-        if (mounted) {
-          ToastMessage.showError(
-              context, response['error'] ?? 'Failed to change password');
-        }
+        ToastMessage.showError(context, response['error'] ?? 'Failed to change password');
       }
     } catch (e) {
       if (!mounted) return;
-      print('❌ Exception: $e');
-      if (mounted) {
-        ToastMessage.showError(context, 'Error: ${e.toString()}');
-      }
+      ToastMessage.showError(context, 'Error: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isChangingPassword = false;
-        });
-      }
+      if (mounted) setState(() => _isChangingPassword = false);
     }
   }
 
-  Future<void> _loadQRCode() async {
-    setState(() {
-      _isLoadingQR = true;
-    });
-
-    try {
-      final authState = context.read<AuthCubit>().state;
-      final studentId = authState.user?.id;
-      final token = authState.token;
-
-      if (studentId != null && token != null) {
-        final response = await ApiService.getStudentQRCode(studentId, token);
-        if (!mounted) return;
-        if (response['success'] == true) {
-          setState(() {
-            _qrCodeData = response['qrCode']['encoded'];
-          });
-          print('✅ QR Code loaded for student ID: $studentId');
-        } else {
-          ToastMessage.showError(
-              context, response['error'] ?? 'Failed to load QR Code');
-        }
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ToastMessage.showError(context, 'Failed to load QR Code');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingQR = false;
-        });
-      }
-    }
-  }
+  // ============================================
+  // BUILD
+  // ============================================
 
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
     final user = authState.user;
-    Student? student;
 
-    if (user != null && dataState.students.isNotEmpty) {
-      student = dataState.students.firstWhere(
-        (s) => s.id == user.id || s.studentId == user.username,
-        orElse: () => dataState.students.first,
-      );
-    }
+    final student = (user != null)
+        ? findStudentSafely(userId: user.id, username: user.username, students: dataState.students)
+        : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -190,112 +367,180 @@ class _StudentProfileState extends State<StudentProfile> {
           constraints: const BoxConstraints(maxWidth: 600),
           child: Column(
             children: [
+              // ===== Profile Card =====
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
                     colors: [
                       Theme.of(context).cardColor.withValues(alpha: 0.95),
-                      Theme.of(context)
-                          .scaffoldBackgroundColor
-                          .withValues(alpha: 0.95),
+                      Theme.of(context).cardColor,
                     ],
                   ),
-                  borderRadius: BorderRadius.circular(32),
-                  border: Border.all(
-                    color:
-                        Theme.of(context).primaryColor.withValues(alpha: 0.25),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200),
                 ),
                 child: Column(
                   children: [
-                    // Avatar
-                    Stack(
-                      children: [
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                    // ✅ Avatar مع image picker
+                    GestureDetector(
+                      onTap: _showImageOptions,
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Container(
+                            width: 100, height: 100,
+                            decoration: BoxDecoration(
+                              gradient: _profileImagePath == null
+                                  ? LinearGradient(colors: [Theme.of(context).primaryColor, const Color(0xFF6366F1)])
+                                  : null,
+                              shape: BoxShape.circle,
+                              image: _profileImagePath != null
+                                  ? DecorationImage(
+                                      image: FileImage(File(_profileImagePath!)),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
                             ),
-                            shape: BoxShape.circle,
+                            child: _profileImagePath == null
+                                ? Center(
+                                    child: Text(
+                                      (student?.name.isNotEmpty ?? false) ? student!.name[0].toUpperCase() : 'S',
+                                      style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
+                                    ),
+                                  )
+                                : null,
                           ),
-                          child: Center(
-                            child: Text(
-                              student?.name.isNotEmpty == true
-                                  ? student!.name[0].toUpperCase()
-                                  : 'S',
-                              style: const TextStyle(
-                                fontSize: 48,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).primaryColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Theme.of(context).cardColor, width: 3),
                             ),
+                            child: const Icon(Icons.camera_alt, color: Colors.white, size: 14),
                           ),
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: GestureDetector(
-                            onTap: _pickImage,
-                            child: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).cardColor,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Theme.of(context).primaryColor,
-                                  width: 2,
-                                ),
-                              ),
-                              child: Icon(
-                                Icons.camera_alt,
-                                size: 20,
-                                color: Theme.of(context).primaryColor,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Name
-                    Text(
-                      student?.name ?? user?.name ?? 'Student',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 32),
-
-                    // Info Section
-                    _buildInfoSection(student, user),
-
-                    const SizedBox(height: 32),
-
-                    // Change Password Section
-                    _buildChangePasswordSection(),
-
                     const SizedBox(height: 16),
-
-                    // QR Code Section
-                    _buildQRCodeSection(),
+                    Text(student?.name ?? user?.name ?? 'Student', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(student?.studentId ?? user?.username ?? '', style: TextStyle(fontSize: 14, color: Theme.of(context).hintColor)),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildInfoChip(Icons.school, 'Level ${student?.level ?? '?'}'),
+                        const SizedBox(width: 12),
+                        _buildInfoChip(Icons.apartment, student?.department ?? 'N/A'),
+                      ],
+                    ),
                   ],
                 ),
               ),
+              const SizedBox(height: 20),
+
+              // ===== QR Code Section =====
+              _buildSectionCard(
+                icon: Icons.qr_code_2,
+                title: 'My QR Code',
+                child: Column(
+                  children: [
+                    if (_showQRCode && _qrCodeData != null && _qrCodeData!.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                        child: QrImageView(data: _qrCodeData!, version: QrVersions.auto, size: 200),
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: () => setState(() { _showQRCode = false; _qrCodeData = null; }),
+                        icon: const Icon(Icons.close, size: 18),
+                        label: const Text('Hide QR Code'),
+                      ),
+                    ] else
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isLoadingQR ? null : _loadQRCode,
+                          icon: _isLoadingQR
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.qr_code),
+                          label: Text(_isLoadingQR ? 'Loading...' : 'Show QR Code'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Theme.of(context).primaryColor,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ===== Change Password Section =====
+              _buildSectionCard(
+                icon: Icons.lock,
+                title: 'Change Password',
+                child: Column(
+                  children: [
+                    if (!_showPasswordFields)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => setState(() => _showPasswordFields = true),
+                          icon: const Icon(Icons.edit),
+                          label: const Text('Change Password'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            side: BorderSide(color: Theme.of(context).primaryColor.withValues(alpha: 0.5)),
+                          ),
+                        ),
+                      )
+                    else
+                      Column(
+                        children: [
+                          _buildPasswordField('Current Password', _currentPasswordController, _obscureCurrent, (v) => setState(() => _obscureCurrent = v)),
+                          const SizedBox(height: 12),
+                          _buildPasswordField('New Password', _newPasswordController, _obscureNew, (v) => setState(() => _obscureNew = v)),
+                          const SizedBox(height: 12),
+                          _buildPasswordField('Confirm Password', _confirmPasswordController, _obscureConfirm, (v) => setState(() => _obscureConfirm = v)),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => setState(() => _showPasswordFields = false),
+                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: _isChangingPassword ? null : _changePassword,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Theme.of(context).primaryColor,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  ),
+                                  child: _isChangingPassword
+                                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : const Text('Update'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 80),
             ],
           ),
         ),
@@ -303,362 +548,100 @@ class _StudentProfileState extends State<StudentProfile> {
     );
   }
 
-  Widget _buildInfoSection(Student? student, dynamic user) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Personal Information',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).primaryColor,
-          ),
-        ),
-        const SizedBox(height: 16),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: 1.6,
-          children: [
-            _buildInfoCard(
-              icon: Icons.badge,
-              label: 'Student ID',
-              value: student?.studentId ?? user?.username ?? 'N/A',
-            ),
-            _buildInfoCard(
-              icon: Icons.person,
-              label: 'Full Name',
-              value: student?.name ?? user?.name ?? 'N/A',
-            ),
-            _buildInfoCard(
-              icon: Icons.school,
-              label: 'Level',
-              value: 'Level ${student?.level ?? 1}',
-            ),
-            _buildInfoCard(
-              icon: Icons.business,
-              label: 'Department',
-              value: student?.department ?? 'General',
-            ),
-          ],
-        ),
-      ],
+  // ============================================
+  // Helper Widgets
+  // ============================================
+
+  Widget _buildInfoChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Theme.of(context).primaryColor),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(fontSize: 12, color: Theme.of(context).primaryColor, fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
   }
 
-  Widget _buildInfoCard({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
+  Widget _buildSectionCard({required IconData icon, required String title, required Widget child}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
-        ),
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Icon(icon,
-                  size: 16,
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                    fontSize: 10,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : Colors.grey.shade600),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : const Color(0xFF1E293B),
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          Row(children: [
+            Icon(icon, color: Theme.of(context).primaryColor, size: 20),
+            const SizedBox(width: 10),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 16),
+          child,
         ],
       ),
     );
   }
 
-  Widget _buildChangePasswordSection() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+  Widget _buildPasswordField(String label, TextEditingController controller, bool obscure, ValueChanged<bool> onToggle) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      decoration: InputDecoration(
+        labelText: label,
+        suffixIcon: IconButton(
+          icon: Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20),
+          onPressed: () => onToggle(!obscure),
         ),
-      ),
-      child: ExpansionTile(
-        leading:
-            Icon(Icons.lock_rounded, color: Theme.of(context).primaryColor),
-        title: Text(
-          'Change Password',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : const Color(0xFF1E293B),
-          ),
-        ),
-        trailing: Icon(
-          _showPasswordFields
-              ? Icons.keyboard_arrow_up
-              : Icons.keyboard_arrow_down,
-          color: isDark ? Colors.white : Colors.grey.shade600,
-        ),
-        onExpansionChanged: (expanded) {
-          setState(() {
-            _showPasswordFields = expanded;
-          });
-        },
-        childrenPadding: const EdgeInsets.all(16),
-        children: [
-          TextField(
-            controller: _currentPasswordController,
-            obscureText: _obscureCurrent,
-            style: TextStyle(
-                color: isDark ? Colors.white : const Color(0xFF1E293B)),
-            decoration: InputDecoration(
-              labelText: 'Current Password',
-              labelStyle: TextStyle(
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureCurrent ? Icons.visibility_off : Icons.visibility,
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _obscureCurrent = !_obscureCurrent;
-                  });
-                },
-              ),
-              filled: true,
-              fillColor: isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.grey.shade50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _newPasswordController,
-            obscureText: _obscureNew,
-            style: TextStyle(
-                color: isDark ? Colors.white : const Color(0xFF1E293B)),
-            decoration: InputDecoration(
-              labelText: 'New Password',
-              labelStyle: TextStyle(
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureNew ? Icons.visibility_off : Icons.visibility,
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _obscureNew = !_obscureNew;
-                  });
-                },
-              ),
-              helperText: 'Minimum 4 characters',
-              helperStyle: TextStyle(
-                  color:
-                      isDark ? const Color(0xFF64748B) : Colors.grey.shade500,
-                  fontSize: 10),
-              filled: true,
-              fillColor: isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.grey.shade50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _confirmPasswordController,
-            obscureText: _obscureConfirm,
-            style: TextStyle(
-                color: isDark ? Colors.white : const Color(0xFF1E293B)),
-            decoration: InputDecoration(
-              labelText: 'Confirm New Password',
-              labelStyle: TextStyle(
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureConfirm ? Icons.visibility_off : Icons.visibility,
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _obscureConfirm = !_obscureConfirm;
-                  });
-                },
-              ),
-              filled: true,
-              fillColor: isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.grey.shade50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _isChangingPassword ? null : _changePassword,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8B5CF6),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: _isChangingPassword
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text(
-                      'Update Password',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white),
-                    ),
-            ),
-          ),
-        ],
       ),
     );
   }
+}
 
-  Widget _buildQRCodeSection() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+// ============================================
+// Full Screen Photo Viewer
+// ============================================
+class _FullScreenPhotoViewer extends StatelessWidget {
+  final String imagePath;
+  const _FullScreenPhotoViewer({required this.imagePath});
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white, size: 28),
+          onPressed: () => Navigator.pop(context),
         ),
+        title: const Text('Profile Photo', style: TextStyle(color: Colors.white)),
       ),
-      child: ExpansionTile(
-        leading: Icon(Icons.qr_code, color: Theme.of(context).primaryColor),
-        title: Text(
-          'My QR Code',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : const Color(0xFF1E293B),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 4.0,
+          child: Hero(
+            tag: 'profile_photo',
+            child: Image.file(
+              File(imagePath),
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 80),
+            ),
           ),
         ),
-        trailing: Icon(
-          _showQRCode ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-          color: isDark ? Colors.white : Colors.grey.shade600,
-        ),
-        onExpansionChanged: (expanded) async {
-          setState(() {
-            _showQRCode = expanded;
-          });
-          if (expanded && _qrCodeData == null) {
-            await _loadQRCode();
-          }
-        },
-        childrenPadding: const EdgeInsets.all(16),
-        children: [
-          if (_isLoadingQR)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_qrCodeData != null && _qrCodeData!.isNotEmpty)
-            Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: QrImageView(
-                    data: _qrCodeData!,
-                    version: QrVersions.auto,
-                    size: 200.0,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Scan this QR code for attendance',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.6)
-                        : Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            )
-          else
-            Text(
-              'No QR code available',
-              style: TextStyle(
-                  color:
-                      isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-            ),
-        ],
       ),
     );
   }

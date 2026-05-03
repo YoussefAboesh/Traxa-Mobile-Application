@@ -1,7 +1,7 @@
 // lib/models/qr_code.dart
-// ignore_for_file: file_names
+// ✅ Fix: اسم الكلاس QrCode بدل QRcode (Dart convention)
 
-class QRcode {
+class QrCode {
   final int id;
   final int studentId;
   final String studentName;
@@ -17,7 +17,7 @@ class QRcode {
   final DateTime? lastScannedAt;
   final int version;
 
-  QRcode({
+  QrCode({
     required this.id,
     required this.studentId,
     required this.studentName,
@@ -34,8 +34,8 @@ class QRcode {
     required this.version,
   });
 
-  factory QRcode.fromJson(Map<String, dynamic> json) {
-    return QRcode(
+  factory QrCode.fromJson(Map<String, dynamic> json) {
+    return QrCode(
       id: json['id'] ?? 0,
       studentId: json['student_id'] ?? 0,
       studentName: json['student_name'] ?? '',
@@ -61,10 +61,7 @@ class QRcode {
       'student_code': studentCode,
       'student_level': studentLevel,
       'student_department': studentDepartment,
-      'qr_data': {
-        'raw': qrData,
-        'encoded': encodedData,
-      },
+      'qr_data': {'raw': qrData, 'encoded': encodedData},
       'generated_at': generatedAt.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
@@ -74,7 +71,6 @@ class QRcode {
     };
   }
 
-  // Getters مفيدة
   bool get isExpired => DateTime.now().difference(generatedAt).inDays > 30;
   String get shortCode => studentCode.length > 8 ? '${studentCode.substring(0, 8)}...' : studentCode;
 }
