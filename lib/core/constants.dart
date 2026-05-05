@@ -1,6 +1,6 @@
 class AppConstants {
   // 🔥 لو بتشغل على موبايل حقيقي غيرها لـ IP بتاع السيرفر
-  static const String baseUrl = 'https://192.168.1.37:3443';
+  static const String baseUrl = 'https://192.168.88.21:3443';
 
   // WebSocket URL (للـ SSE)
   static String get wsUrl {
@@ -35,6 +35,11 @@ class AppConstants {
 
   // Days
   static const List<String> days = [
-    'Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
+    'Saturday',
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday'
   ];
 }
