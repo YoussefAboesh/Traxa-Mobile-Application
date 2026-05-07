@@ -52,11 +52,21 @@ Subject? findSubjectSafely(int subjectId, List<Subject> subjects) {
 /// DateTime.weekday: Monday=1, Sunday=7
 /// الأيام عندنا: Saturday, Sunday, Monday, ...
 String getTodayDayName() {
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const days = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday'
+  ];
   return days[DateTime.now().weekday - 1];
 }
 
-/// حساب GPA موحد — بدل ما يتكرر في 3 أماكن
+/// ✅ حساب GPA حسب الجدول الرسمي لكلية الحاسبات والمعلومات
+/// المعادلة: GPA = مجموع (نقاط المادة × ساعاتها) / مجموع الساعات
+/// التقريب لأقرب رقمين عشريين
 double calculateGPA(List<Grade> grades, List<Subject> subjects) {
   if (grades.isEmpty || subjects.isEmpty) return 0.0;
 
@@ -67,21 +77,45 @@ double calculateGPA(List<Grade> grades, List<Subject> subjects) {
     if (!grade.isVisible) continue;
 
     final subject = findSubjectSafely(grade.subjectId, subjects);
-    if (subject == null) continue; // ✅ بدل orElse: () => subjects.first
+    if (subject == null) continue;
 
     final credits = subject.totalCreditHours;
     totalPoints += grade.gradePoints * credits;
     totalCredits += credits;
   }
 
-  return totalCredits > 0 ? (totalPoints / totalCredits) : 0.0;
+  // التقريب لأقرب رقمين عشريين
+  final gpa = totalCredits > 0 ? (totalPoints / totalCredits) : 0.0;
+  return double.parse(gpa.toStringAsFixed(2));
 }
 
-/// حساب الساعات المكتسبة (passed فقط)
+/// ✅ حساب GPA الفصلي (Semester GPA)
+double calculateSemesterGPA(
+    List<Grade> grades, List<Subject> subjects, int semester) {
+  final semesterGrades =
+      grades.where((g) => g.semester == semester && g.isVisible).toList();
+  return calculateGPA(semesterGrades, subjects);
+}
+
+/// ✅ حساب GPA لمستوى معين
+double calculateLevelGPA(
+    List<Grade> grades, List<Subject> subjects, int level) {
+  final levelGrades =
+      grades.where((g) => g.level == level && g.isVisible).toList();
+  return calculateGPA(levelGrades, subjects);
+}
+
+/// ✅ حساب المعدل التراكمي المجمع (CGPA) - نفس صيغة الـ GPA
+double calculateCumulativeGPA(List<Grade> grades, List<Subject> subjects) {
+  return calculateGPA(grades, subjects);
+}
+
+/// ✅ حساب الساعات المكتسبة (النجاح بـ 50% فأكثر - D- فأعلى)
 int calculateEarnedCredits(List<Grade> grades, List<Subject> subjects) {
   int total = 0;
   for (final grade in grades) {
     if (grade.total >= 50 && grade.isVisible) {
+      // النجاح من 50% (D-)
       final subject = findSubjectSafely(grade.subjectId, subjects);
       if (subject != null) {
         total += subject.totalCreditHours;
@@ -89,4 +123,47 @@ int calculateEarnedCredits(List<Grade> grades, List<Subject> subjects) {
     }
   }
   return total;
+}
+
+/// ✅ حساب الساعات المسجلة (كل المواد المسجلة)
+int calculateRegisteredCredits(List<Grade> grades, List<Subject> subjects) {
+  int total = 0;
+  for (final grade in grades) {
+    if (grade.isVisible) {
+      final subject = findSubjectSafely(grade.subjectId, subjects);
+      if (subject != null) {
+        total += subject.totalCreditHours;
+      }
+    }
+  }
+  return total;
+}
+
+/// ✅ حساب مجموع النقاط × الساعات (للتأكيد)
+double calculateTotalGradePoints(List<Grade> grades, List<Subject> subjects) {
+  double total = 0;
+  for (final grade in grades) {
+    if (grade.isVisible) {
+      final subject = findSubjectSafely(grade.subjectId, subjects);
+      if (subject != null) {
+        total += grade.gradePoints * subject.totalCreditHours;
+      }
+    }
+  }
+  return double.parse(total.toStringAsFixed(2));
+}
+
+/// ✅ حساب عدد المواد الناجحة
+int countPassedSubjects(List<Grade> grades) {
+  return grades.where((g) => g.total >= 50 && g.isVisible).length;
+}
+
+/// ✅ حساب عدد المواد الراسبة
+int countFailedSubjects(List<Grade> grades) {
+  return grades.where((g) => g.total < 50 && g.total > 0 && g.isVisible).length;
+}
+
+/// ✅ التقريب لأقرب رقمين عشريين
+double roundToTwoDecimals(double value) {
+  return double.parse(value.toStringAsFixed(2));
 }
