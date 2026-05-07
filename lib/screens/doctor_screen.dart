@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../cubit/theme/theme_cubit.dart';
+import '../services/websocket_service.dart';
 import '../widgets/settings_bottom_sheet.dart';
 import 'sections/doctor/doctor_overview.dart';
 import 'sections/doctor/doctor_subjects.dart';
@@ -47,6 +48,133 @@ class _DoctorScreenState extends State<DoctorScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _setupWebSocketListeners();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  void _setupWebSocketListeners() {
+    final ws = WebSocketService.instance;
+
+    // ✅ الترم اتغير
+    ws.semesterStream.listen((semester) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Semester changed to S$semester - Refreshing data...'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().refreshForNewSemester();
+    });
+
+    // ✅ السنة الأكاديمية اتغيرت
+    ws.academicYearStream.listen((year) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Academic year changed to $year'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().loadAllData();
+    });
+
+    // ✅ محاضرة اتعملت
+    ws.sessionActivatedStream.listen((data) {
+      if (!mounted) return;
+      final session = data['session'] as Map<String, dynamic>?;
+      final subjectName = session?['subjectName'] ?? 'Unknown';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Session activated: $subjectName'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      // تحديث Attendance tab إذا كان مفتوحاً
+      if (_selectedIndex == 2) {
+        context.read<DataCubit>().loadAllData();
+      }
+    });
+
+    // ✅ محاضرة انتهت
+    ws.sessionEndedStream.listen((data) {
+      if (!mounted) return;
+      final sessionId = data['sessionId'] as String? ?? 'Unknown';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Session ended: $sessionId'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      if (_selectedIndex == 2) {
+        context.read<DataCubit>().loadAllData();
+      }
+    });
+
+    // ✅ درجة اتغيرت
+    ws.gradeUpdateStream.listen((gradeData) {
+      if (!mounted) return;
+      final studentId = gradeData['student_id'] as int?;
+      final total = (gradeData['total'] as num?)?.toDouble();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Grade updated for student #$studentId: $total%'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // تحديث Reports tab إذا كان مفتوحاً
+      if (_selectedIndex == 3) {
+        context.read<DataCubit>().loadAllData();
+      }
+    });
+
+    // ✅ المستويات اترفعت
+    ws.levelsPromotedStream.listen((data) {
+      if (!mounted) return;
+      final newYear = data['displayAcademicYear'] as String?;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Academic year advanced to $newYear'),
+          backgroundColor: Colors.blue,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().loadAllData();
+    });
+
+    // ✅ أي تغيير عام في البيانات
+    ws.dataChangeStream.listen((data) {
+      if (!mounted) return;
+      final type = data['type'] as String?;
+      if (type == 'DATA_CHANGE') {
+        final entity = data['entity'] as String?;
+        final action = data['action'] as String?;
+        print('📱 DoctorScreen: Data change - $entity / $action');
+
+        // تحديث حسب القسم المفتوح
+        if (entity == 'subject' || entity == 'lecture') {
+          if (_selectedIndex == 0 || _selectedIndex == 1) {
+            context.read<DataCubit>().loadAllData();
+          }
+        }
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
@@ -54,6 +182,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
     final doctor = authState.user;
     final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final currentSemester = dataState.currentSemester;
 
     // البحث عن الإيميل من بيانات الدكتور
     String? doctorEmail;
@@ -73,19 +202,40 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Traxa',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
+        title: Row(
+          children: [
+            const Text(
+              'Traxa',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'S$currentSemester',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
+            ),
+          ],
         ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Builder(
           builder: (context) => IconButton(
-            icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
+            icon:
+                Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
             onPressed: () {
               Scaffold.of(context).openDrawer();
             },
@@ -107,6 +257,33 @@ class _DoctorScreenState extends State<DoctorScreen> {
           ),
           // 🌙☀️ Animated Theme Toggle Button
           _buildAnimatedThemeToggle(isDarkMode),
+          // 🔴 WebSocket connection indicator
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: StreamBuilder<bool>(
+              stream: Stream.periodic(const Duration(seconds: 1),
+                  (_) => WebSocketService.instance.isConnected),
+              initialData: WebSocketService.instance.isConnected,
+              builder: (context, snapshot) {
+                final isConnected = snapshot.data ?? false;
+                return Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isConnected ? Colors.green : Colors.red,
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isConnected ? Colors.green : Colors.red)
+                            .withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
       drawer: _buildDrawer(context, doctor, doctorEmail),
@@ -136,7 +313,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
             },
             backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
             selectedItemColor: const Color(0xFF0EA5E9),
-            unselectedItemColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            unselectedItemColor:
+                isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             selectedLabelStyle: const TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 12,
@@ -156,7 +334,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
   // ✅ زر تبديل الثيم المتحرك والجذاب (بنفس ألوان الدكتور - أزرق)
   Widget _buildAnimatedThemeToggle(bool isDarkMode) {
     const doctorPrimaryColor = Color(0xFF0EA5E9);
-    
+
     return GestureDetector(
       onTap: () {
         context.read<ThemeCubit>().toggleTheme();
@@ -181,14 +359,18 @@ class _DoctorScreenState extends State<DoctorScreen> {
             gradient: LinearGradient(
               colors: isDarkMode
                   ? [Colors.amber.shade300, Colors.orange.shade400]
-                  : [doctorPrimaryColor, doctorPrimaryColor.withValues(alpha: 0.7)],
+                  : [
+                      doctorPrimaryColor,
+                      doctorPrimaryColor.withValues(alpha: 0.7)
+                    ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: (isDarkMode ? Colors.amber : doctorPrimaryColor).withValues(alpha: 0.3),
+                color: (isDarkMode ? Colors.amber : doctorPrimaryColor)
+                    .withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -214,7 +396,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
   Widget _buildDrawer(BuildContext context, dynamic doctor, String? email) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Drawer(
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       width: 280,
@@ -300,7 +482,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
                 ],
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -372,7 +555,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
               'Traxa v2.0.0',
               style: TextStyle(
                 fontSize: 12,
-                color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade500,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.3)
+                    : Colors.grey.shade500,
               ),
             ),
           ),
@@ -388,11 +573,13 @@ class _DoctorScreenState extends State<DoctorScreen> {
     bool isDestructive = false,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? Colors.redAccent : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+        color: isDestructive
+            ? Colors.redAccent
+            : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
         size: 24,
       ),
       title: Text(
@@ -400,7 +587,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
         style: TextStyle(
           fontSize: 16,
           fontWeight: FontWeight.w500,
-          color: isDestructive ? Colors.redAccent : (isDark ? Colors.white : const Color(0xFF1E293B)),
+          color: isDestructive
+              ? Colors.redAccent
+              : (isDark ? Colors.white : const Color(0xFF1E293B)),
         ),
       ),
       trailing: isDestructive
@@ -408,7 +597,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
           : Icon(
               Icons.chevron_right,
               size: 20,
-              color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade400,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.3)
+                  : Colors.grey.shade400,
             ),
       onTap: onTap,
       hoverColor: Colors.white.withValues(alpha: 0.05),
@@ -430,7 +621,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
   void _showLogoutDialog(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -444,19 +635,22 @@ class _DoctorScreenState extends State<DoctorScreen> {
             SizedBox(width: 12),
             Text(
               'Logout',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ],
         ),
         content: Text(
           'Are you sure you want to logout?',
-          style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+          style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+              foregroundColor:
+                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             ),
             child: const Text('Cancel'),
           ),
@@ -465,6 +659,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
               Navigator.pop(context);
               context.read<AuthCubit>().logout();
               context.read<DataCubit>().clearData();
+              WebSocketService.instance.disconnect();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,

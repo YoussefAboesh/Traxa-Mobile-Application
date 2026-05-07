@@ -12,6 +12,7 @@ import '../../../models/lecture.dart';
 import '../../../models/student.dart';
 import '../../../models/subject.dart';
 import '../../../core/constants.dart';
+import '../../../services/websocket_service.dart';
 
 enum SessionPhase { none, active, confirming }
 
@@ -30,7 +31,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   // Filters
   String _selectedDay = '';
   bool _showActiveSessions = false;
-  int _selectedSemester = 0;
   int _selectedLevel = 0;
 
   // Session
@@ -72,6 +72,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _tryRestoreSession());
+    _setupWebSocketListeners();
   }
 
   @override
@@ -80,6 +81,98 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     _pollTimer?.cancel();
     _confirmTimer?.cancel();
     super.dispose();
+  }
+
+  // ============================================
+  // WebSocket Listeners for Real-time Sync
+  // ============================================
+  void _setupWebSocketListeners() {
+    final ws = WebSocketService.instance;
+
+    // استماع للجلسات الجديدة من أي جهاز
+    ws.sessionActivatedStream.listen((data) {
+      if (!mounted) return;
+      final session = data['session'] as Map<String, dynamic>?;
+      if (session == null) return;
+
+      final authState = context.read<AuthCubit>().state;
+      final doctorId = authState.user?.id;
+
+      // لو الجلسة لدكتور تاني، مش هنعمل حاجة
+      if (session['doctorId'] != doctorId) return;
+
+      // لو فيه جلسة نشطة بالفعل، نطلب Full Sync
+      if (_phase != SessionPhase.none) {
+        _requestFullSync();
+        return;
+      }
+
+      // استعادة الجلسة من السيرفر
+      _restoreSessionFromData(session);
+    });
+
+    ws.sessionEndedStream.listen((data) {
+      if (!mounted) return;
+      final sessionId = data['sessionId'] as String?;
+      final doctorId = data['doctorId'] as int?;
+
+      final authState = context.read<AuthCubit>().state;
+      if (doctorId != authState.user?.id) return;
+
+      if (_activeSessionId == sessionId && _phase != SessionPhase.none) {
+        _snack('Session ended from another device', Colors.orange);
+        _resetSession();
+      }
+    });
+
+    ws.dataChangeStream.listen((data) {
+      if (!mounted) return;
+      final type = data['type'] as String?;
+      if (type == 'FULL_SYNC') {
+        _tryRestoreSession();
+      }
+    });
+  }
+
+  Future<void> _requestFullSync() async {
+    final ws = WebSocketService.instance;
+    ws.sendMessage({'type': 'REQUEST_SYNC'});
+  }
+
+  Future<void> _restoreSessionFromData(Map<String, dynamic> sessionData) async {
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+
+    try {
+      final lectureId = sessionData['lectureId'] as int?;
+      final dataState = context.read<DataCubit>().state;
+      Lecture? lecture;
+      try {
+        lecture = dataState.lectures.firstWhere((l) => l.id == lectureId);
+      } catch (_) {}
+
+      if (lecture != null) {
+        final students =
+            await _getEnrolledStudents(lecture.subjectId, auth.token!);
+        setState(() {
+          _phase = SessionPhase.active;
+          _activeSession = lecture;
+          _activeSessionId = sessionData['sessionId'] as String?;
+          _sessionStartTime =
+              DateTime.tryParse(sessionData['startTime'] ?? '') ??
+                  DateTime.now();
+          _sessionStudents = students;
+          _showActiveSessions = true;
+        });
+        if (_activeSessionId != null) {
+          _startHeartbeat(_activeSessionId!, auth.token!);
+          _startPolling(_activeSessionId!, auth.token!);
+        }
+        _snack('Session restored from web', Colors.green);
+      }
+    } catch (e) {
+      print('Error restoring session: $e');
+    }
   }
 
   // ============================================
@@ -161,6 +254,22 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     } catch (_) {}
   }
 
+  void _resetSession() {
+    setState(() {
+      _phase = SessionPhase.none;
+      _activeSession = null;
+      _activeSessionId = null;
+      _sessionStartTime = null;
+      _sessionEndTime = null;
+      _sessionStudents = null;
+      _isCameraOpen = false;
+      _confirmedCount = 0;
+      _pendingCount = 0;
+      _attendanceRecords = [];
+      _showActiveSessions = false;
+    });
+  }
+
   // ============================================
   // Get enrolled students for a subject
   // ============================================
@@ -189,7 +298,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   // ============================================
-  // 1. ACTIVATE SESSION
+  // 1. ACTIVATE SESSION with WebSocket Broadcast
   // ============================================
   Future<void> _activateSession(Lecture lecture) async {
     setState(() => _isActivating = true);
@@ -240,6 +349,24 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         return;
       }
 
+      // ✅ Broadcast to all clients via WebSocket
+      final ws = WebSocketService.instance;
+      ws.sendMessage({
+        'type': 'SESSION_ACTIVATED',
+        'session': {
+          'sessionId': sessionId,
+          'lectureId': lecture.id,
+          'doctorId': user.id,
+          'doctorName': user.name,
+          'subjectName': lecture.subjectName,
+          'level': lecture.level,
+          'department': lecture.department,
+          'startTime': now.toIso8601String(),
+        },
+        'doctorId': user.id,
+        'timestamp': DateTime.now().toIso8601String()
+      });
+
       // Open camera on host
       bool camOk = false;
       try {
@@ -288,9 +415,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     }
   }
 
-  // ============================================
-  // 2. END SESSION → 30 min QR window
-  // ============================================
+// ============================================
+// 2. END SESSION with WebSocket Broadcast (محسنة)
+// ============================================
   Future<void> _endSession() async {
     if (_activeSessionId == null) return;
     final now = DateTime.now();
@@ -300,6 +427,22 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       _sessionEndTime = now;
       _confirmRemaining = _qrDuration;
     });
+
+    // ✅ Broadcast session ended to all clients BEFORE the QR window
+    final ws = WebSocketService.instance;
+    final authState = context.read<AuthCubit>().state;
+
+    ws.sendMessage({
+      'type': 'SESSION_ENDED',
+      'sessionId': _activeSessionId,
+      'doctorId': authState.user?.id,
+      'doctorName': authState.user?.name,
+      'subjectName': _activeSession?.subjectName,
+      'endedAt': now.toIso8601String(),
+      'timestamp': DateTime.now().toIso8601String()
+    });
+
+    print('📡 Broadcasted SESSION_ENDED for: $_activeSessionId');
 
     _confirmTimer?.cancel();
     _confirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -319,9 +462,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
   }
 
-  // ============================================
-  // 3. FINALIZE — close camera + send report
-  // ============================================
+// ============================================
+// 3. FINALIZE — close camera + send report with WebSocket Sync (محسنة)
+// ============================================
   Future<void> _finalizeSession() async {
     _confirmTimer?.cancel();
     _pollTimer?.cancel();
@@ -330,15 +473,19 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     final auth = context.read<AuthCubit>().state;
     if (auth.token == null) return;
 
+    Map<String, dynamic>? report;
+
     try {
       // Delete session → camera closes
-      await http
+      final deleteRes = await http
           .delete(
             Uri.parse(
                 '${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId'),
             headers: _headers(auth.token!),
           )
           .timeout(const Duration(seconds: 10));
+
+      print('Delete session response: ${deleteRes.statusCode}');
 
       // Build report
       final rptStudents = _sessionStudents?.map((s) {
@@ -376,31 +523,45 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           }).toList() ??
           [];
 
-      // Send report
-      await http
+      report = {
+        'sessionId': _activeSessionId,
+        'lectureId': _activeSession?.id,
+        'doctorId': auth.user?.id,
+        'doctorName': auth.user?.name,
+        'subjectName': _activeSession?.subjectName,
+        'level': _activeSession?.level,
+        'department': _activeSession?.department,
+        'createdAt': _sessionStartTime?.toIso8601String(),
+        'endedAt': _sessionEndTime?.toIso8601String(),
+        'totalStudents': _sessionStudents?.length ?? 0,
+        'presentCount': _confirmedCount,
+        'pendingCount': _pendingCount,
+        'absentCount':
+            (_sessionStudents?.length ?? 0) - _confirmedCount - _pendingCount,
+        'students': rptStudents,
+      };
+
+      // Send report to server
+      final reportRes = await http
           .post(
             Uri.parse('${AppConstants.baseUrl}/api/attendance-reports'),
             headers: _headers(auth.token!),
-            body: jsonEncode({
-              'sessionId': _activeSessionId,
-              'lectureId': _activeSession?.id,
-              'doctorId': auth.user?.id,
-              'doctorName': auth.user?.name,
-              'subjectName': _activeSession?.subjectName,
-              'level': _activeSession?.level,
-              'department': _activeSession?.department,
-              'createdAt': _sessionStartTime?.toIso8601String(),
-              'endedAt': _sessionEndTime?.toIso8601String(),
-              'totalStudents': _sessionStudents?.length ?? 0,
-              'presentCount': _confirmedCount,
-              'pendingCount': _pendingCount,
-              'absentCount': (_sessionStudents?.length ?? 0) -
-                  _confirmedCount -
-                  _pendingCount,
-              'students': rptStudents,
-            }),
+            body: jsonEncode(report),
           )
           .timeout(const Duration(seconds: 10));
+
+      print('Report save response: ${reportRes.statusCode}');
+
+      if (reportRes.statusCode == 200) {
+        // ✅ Broadcast report to all clients
+        final ws = WebSocketService.instance;
+        ws.sendMessage({
+          'type': 'REPORT_SAVED',
+          'report': report,
+          'timestamp': DateTime.now().toIso8601String()
+        });
+        print('📡 Broadcasted REPORT_SAVED');
+      }
     } catch (e) {
       debugPrint('Finalize error: $e');
     }
@@ -469,13 +630,12 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   Future<void> _openCameraView() async {
     if (_activeSessionId == null) return;
 
-    // ✅ Request camera and microphone permissions
     final camStatus = await Permission.camera.request();
     await Permission.microphone.request();
 
     if (!camStatus.isGranted) {
       _snack('Camera permission denied - go to Settings to allow', Colors.red);
-      openAppSettings(); // Opens app settings so user can grant permission
+      openAppSettings();
       return;
     }
 
@@ -677,13 +837,19 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     super.build(context);
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
+    final currentSemester = dataState.currentSemester;
 
     final user = authState.user;
     final doctorId = user?.id ?? 0;
 
-    List<Subject> doctorSubjects =
-        dataState.subjects.where((s) => s.doctorId == doctorId).toList();
+    // جلب المواد الخاصة بالدكتور في الترم الحالي فقط
+    List<Subject> doctorSubjects = dataState.subjects
+        .where((s) => s.doctorId == doctorId && s.semester == currentSemester)
+        .toList();
+
     final doctorSubjectIds = doctorSubjects.map((s) => s.id).toList();
+
+    // جلب المحاضرات المرتبطة بهذه المواد فقط
     List<Lecture> doctorLectures = dataState.lectures
         .where((l) => doctorSubjectIds.contains(l.subjectId))
         .toList();
@@ -691,21 +857,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     if (_selectedLevel != 0) {
       doctorLectures =
           doctorLectures.where((l) => l.level == _selectedLevel).toList();
-    }
-    if (_selectedSemester == 1) {
-      final ids = doctorSubjects
-          .where((s) => s.semester == 1)
-          .map((s) => s.id)
-          .toList();
-      doctorLectures =
-          doctorLectures.where((l) => ids.contains(l.subjectId)).toList();
-    } else if (_selectedSemester == 2) {
-      final ids = doctorSubjects
-          .where((s) => s.semester == 2)
-          .map((s) => s.id)
-          .toList();
-      doctorLectures =
-          doctorLectures.where((l) => ids.contains(l.subjectId)).toList();
     }
     if (_selectedDay.isNotEmpty) {
       doctorLectures =
@@ -806,9 +957,41 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   // ============================================
   Widget _buildLecturesContent(
       Map<String, List<Lecture>> lecturesByDay, List<String> daysToShow) {
+    final currentSemester = context.read<DataCubit>().state.currentSemester;
+
     return CustomScrollView(
       slivers: [
-        // Filters
+        // ✅ Semester info banner
+        SliverToBoxAdapter(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.info_outline,
+                    size: 16, color: Theme.of(context).primaryColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Showing lectures for Semester $currentSemester',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Filters (Level only - no semester filter)
         SliverToBoxAdapter(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -831,16 +1014,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                         DropdownMenuItem(value: l, child: Text('Level $l'))),
                   ],
                   (v) => setState(() => _selectedLevel = v ?? 0),
-                ),
-                const SizedBox(height: 10),
-                _buildDropdown<int>(
-                  _selectedSemester,
-                  const [
-                    DropdownMenuItem(value: 0, child: Text('All Semesters')),
-                    DropdownMenuItem(value: 1, child: Text('Semester 1')),
-                    DropdownMenuItem(value: 2, child: Text('Semester 2')),
-                  ],
-                  (v) => setState(() => _selectedSemester = v ?? 0),
                 ),
                 const SizedBox(height: 10),
                 _buildDropdown<String?>(
@@ -1062,7 +1235,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // Session info card
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -1150,10 +1322,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // Camera button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -1172,10 +1341,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               ),
             ),
           ),
-
           const SizedBox(height: 12),
-
-          // View Students
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1196,8 +1362,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               ),
             ),
           ),
-
-          // Students list
           if (_showStudentList &&
               _sessionStudents != null &&
               _sessionStudents!.isNotEmpty) ...[
@@ -1314,10 +1478,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               ),
             ),
           ],
-
           const SizedBox(height: 20),
-
-          // Action buttons
           if (_phase == SessionPhase.active)
             SizedBox(
               width: double.infinity,

@@ -19,7 +19,8 @@ class ApiService {
       _token = prefs.getString(AppConstants.tokenKey);
 
       if (_token != null) {
-        print('🔑 Token loaded from SharedPreferences: ${_token!.substring(0, 20)}...');
+        print(
+            '🔑 Token loaded from SharedPreferences: ${_token!.substring(0, 20)}...');
       } else {
         print('🔑 No token found in SharedPreferences');
       }
@@ -40,7 +41,8 @@ class ApiService {
 
       if (token != null && token.isNotEmpty) {
         await prefs.setString(AppConstants.tokenKey, token);
-        print('🔑 Token saved to SharedPreferences: ${token.substring(0, 20)}...');
+        print(
+            '🔑 Token saved to SharedPreferences: ${token.substring(0, 20)}...');
       } else {
         await prefs.remove(AppConstants.tokenKey);
         print('🔑 Token removed from SharedPreferences');
@@ -129,7 +131,8 @@ class ApiService {
       print('🔐 Student login attempt: $studentId');
 
       final response = await http.post(
-        Uri.parse('${AppConstants.baseUrl}${AppConstants.studentLoginEndpoint}'),
+        Uri.parse(
+            '${AppConstants.baseUrl}${AppConstants.studentLoginEndpoint}'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'username': studentId,
@@ -303,7 +306,8 @@ class ApiService {
       print('   Token available: $hasValidToken');
 
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}${AppConstants.lecturesEndpoint}?semester=$semester'),
+        Uri.parse(
+            '${AppConstants.baseUrl}${AppConstants.lecturesEndpoint}?semester=$semester'),
         headers: _headers,
       );
 
@@ -351,7 +355,8 @@ class ApiService {
     print('   Token available: $hasValidToken');
 
     final res = await http.get(
-      Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
+      Uri.parse(
+          '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
       headers: _headers,
     );
 
@@ -365,7 +370,8 @@ class ApiService {
       print('📊 Fetching grades for student $studentId with provided token');
 
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
+        Uri.parse(
+            '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/visible'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -390,7 +396,8 @@ class ApiService {
       int studentId, String token) async {
     try {
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/debug'),
+        Uri.parse(
+            '${AppConstants.baseUrl}${AppConstants.gradesEndpoint}/$studentId/debug'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -413,7 +420,8 @@ class ApiService {
       int doctorId, int subjectId, String token) async {
     try {
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/grade-distributions/$doctorId/$subjectId'),
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/grade-distributions/$doctorId/$subjectId'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -452,7 +460,8 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('✅ QR Code loaded for student: ${data['qrCode']?['student_name'] ?? studentId}');
+        print(
+            '✅ QR Code loaded for student: ${data['qrCode']?['student_name'] ?? studentId}');
         return data;
       } else {
         return {'success': false, 'error': 'Failed to get QR code'};
@@ -596,7 +605,8 @@ class ApiService {
       int studentId, int semester, String token) async {
     try {
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/enrollment/available/$studentId/$semester'),
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/enrollment/available/$studentId/$semester'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -657,13 +667,33 @@ class ApiService {
     }
   }
 
+  // ================= SYNC STATUS (Polling Fallback) =================
+
+  static Future<Map<String, dynamic>> getSyncStatus(int lastUpdate) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/sync/status?lastUpdate=$lastUpdate'),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {'hasUpdates': false};
+    } catch (e) {
+      print('Error checking sync status: $e');
+      return {'hasUpdates': false};
+    }
+  }
+
   // ================= MOBILE UPDATES (SSE / Polling) =================
 
   static Future<Map<String, dynamic>> checkForMobileUpdates(
       String token, int lastTimestamp) async {
     try {
       final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

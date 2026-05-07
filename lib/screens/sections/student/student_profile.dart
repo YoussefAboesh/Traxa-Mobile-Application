@@ -211,8 +211,9 @@ class _StudentProfileState extends State<StudentProfile> {
       if (pickedFile != null && mounted) {
         setState(() => _profileImagePath = pickedFile.path);
         await _saveProfileImagePath(pickedFile.path);
-        if (mounted)
+        if (mounted) {
           ToastMessage.showSuccess(context, 'Profile photo updated!');
+        }
       }
     } catch (e) {
       if (mounted) {

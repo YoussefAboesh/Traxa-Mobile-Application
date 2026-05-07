@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../cubit/theme/theme_cubit.dart';
+import '../services/websocket_service.dart';
 import '../widgets/settings_bottom_sheet.dart';
 import 'sections/student/student_overview.dart';
 import 'sections/student/student_schedule.dart';
@@ -47,11 +48,160 @@ class _StudentScreenState extends State<StudentScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _setupWebSocketListeners();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  void _setupWebSocketListeners() {
+    final ws = WebSocketService.instance;
+
+    // ✅ الترم اتغير
+    ws.semesterStream.listen((semester) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Semester changed to S$semester - Refreshing data...'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().refreshForNewSemester();
+      final authState = context.read<AuthCubit>().state;
+      if (authState.user != null && authState.token != null) {
+        context.read<DataCubit>().loadStudentGradesWithToken(
+              authState.user!.id,
+              authState.token!,
+            );
+      }
+    });
+
+    // ✅ السنة الأكاديمية اتغيرت
+    ws.academicYearStream.listen((year) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Academic year changed to $year'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().loadAllData();
+    });
+
+    // ✅ درجة اتغيرت
+    ws.gradeUpdateStream.listen((gradeData) {
+      if (!mounted) return;
+      final authState = context.read<AuthCubit>().state;
+      final studentId = gradeData['student_id'] as int?;
+      (gradeData['total'] as num?)?.toDouble();
+
+      if (authState.user != null && studentId == authState.user!.id) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your grade has been updated!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        if (authState.token != null) {
+          context.read<DataCubit>().loadStudentGradesWithToken(
+                authState.user!.id,
+                authState.token!,
+              );
+        }
+      }
+    });
+
+    // ✅ طلب تسجيل اتم الموافقة عليه
+    ws.registrationApprovedStream.listen((subjects) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Your registration request was approved! (${subjects.length} subjects)'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().loadAllData();
+    });
+
+    // ✅ المستويات اترفعت
+    ws.levelsPromotedStream.listen((data) {
+      if (!mounted) return;
+      final newYear = data['displayAcademicYear'] as String?;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Academic year advanced to $newYear'),
+          backgroundColor: Colors.blue,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      context.read<DataCubit>().loadAllData();
+      final authState = context.read<AuthCubit>().state;
+      if (authState.user != null && authState.token != null) {
+        context.read<DataCubit>().loadStudentGradesWithToken(
+              authState.user!.id,
+              authState.token!,
+            );
+      }
+    });
+
+    // ✅ أي تغيير عام في البيانات
+    ws.dataChangeStream.listen((data) {
+      if (!mounted) return;
+      final type = data['type'] as String?;
+      if (type == 'DATA_CHANGE') {
+        final entity = data['entity'] as String?;
+        final action = data['action'] as String?;
+        print('📱 StudentScreen: Data change - $entity / $action');
+
+        // تحديث حسب نوع التغيير
+        if (entity == 'grade' && (action == 'created' || action == 'updated')) {
+          final gradeData = data['data'] as Map<String, dynamic>?;
+          if (gradeData != null) {
+            final studentId = gradeData['student_id'] as int?;
+            final authState = context.read<AuthCubit>().state;
+            if (authState.user != null && studentId == authState.user!.id) {
+              context.read<DataCubit>().loadStudentGradesWithToken(
+                    authState.user!.id,
+                    authState.token!,
+                  );
+            }
+          }
+        } else if (entity == 'student' ||
+            entity == 'subject' ||
+            entity == 'lecture') {
+          context.read<DataCubit>().loadAllData();
+        }
+      } else if (type == 'FULL_SYNC') {
+        print('📱 Full sync received from server');
+        context.read<DataCubit>().loadAllData();
+        final authState = context.read<AuthCubit>().state;
+        if (authState.user != null && authState.token != null) {
+          context.read<DataCubit>().loadStudentGradesWithToken(
+                authState.user!.id,
+                authState.token!,
+              );
+        }
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final themeCubit = context.watch<ThemeCubit>();
     final student = authState.user;
     final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
+    final dataState = context.watch<DataCubit>().state;
+    final currentSemester = dataState.currentSemester;
 
     if (student == null) {
       return const Scaffold(
@@ -61,26 +211,46 @@ class _StudentScreenState extends State<StudentScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Traxa',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
+        title: Row(
+          children: [
+            const Text(
+              'Traxa',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'S$currentSemester',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
+            ),
+          ],
         ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Builder(
           builder: (context) => IconButton(
-            icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
+            icon:
+                Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
             onPressed: () {
               Scaffold.of(context).openDrawer();
             },
           ),
         ),
         actions: [
-          // 🔔 Notifications
           IconButton(
             icon: Icon(Icons.notifications_none_rounded,
                 color: Theme.of(context).hintColor),
@@ -93,8 +263,33 @@ class _StudentScreenState extends State<StudentScreen> {
               );
             },
           ),
-          // 🌙☀️ Animated Theme Toggle Button
           _buildAnimatedThemeToggle(isDarkMode),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: StreamBuilder<bool>(
+              stream: Stream.periodic(const Duration(seconds: 1),
+                  (_) => WebSocketService.instance.isConnected),
+              initialData: WebSocketService.instance.isConnected,
+              builder: (context, snapshot) {
+                final isConnected = snapshot.data ?? false;
+                return Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isConnected ? Colors.green : Colors.red,
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isConnected ? Colors.green : Colors.red)
+                            .withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
       drawer: _buildDrawer(context, student),
@@ -122,7 +317,8 @@ class _StudentScreenState extends State<StudentScreen> {
                 _selectedIndex = index;
               });
             },
-            backgroundColor: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+            backgroundColor:
+                Theme.of(context).bottomNavigationBarTheme.backgroundColor,
             selectedItemColor: const Color(0xFF8B5CF6),
             unselectedItemColor: Theme.of(context).hintColor,
             selectedLabelStyle: const TextStyle(
@@ -141,7 +337,6 @@ class _StudentScreenState extends State<StudentScreen> {
     );
   }
 
-  // ✅ زر تبديل الثيم المتحرك والجذاب
   Widget _buildAnimatedThemeToggle(bool isDarkMode) {
     return GestureDetector(
       onTap: () {
@@ -174,7 +369,8 @@ class _StudentScreenState extends State<StudentScreen> {
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: (isDarkMode ? Colors.amber : Colors.purple).withValues(alpha: 0.3),
+                color: (isDarkMode ? Colors.amber : Colors.purple)
+                    .withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -200,7 +396,7 @@ class _StudentScreenState extends State<StudentScreen> {
 
   Widget _buildDrawer(BuildContext context, dynamic student) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Drawer(
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       width: 280,
@@ -275,7 +471,8 @@ class _StudentScreenState extends State<StudentScreen> {
                 ),
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -347,7 +544,9 @@ class _StudentScreenState extends State<StudentScreen> {
               'Traxa v2.0.0',
               style: TextStyle(
                 fontSize: 12,
-                color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade500,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.3)
+                    : Colors.grey.shade500,
               ),
             ),
           ),
@@ -363,11 +562,13 @@ class _StudentScreenState extends State<StudentScreen> {
     bool isDestructive = false,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? Colors.redAccent : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+        color: isDestructive
+            ? Colors.redAccent
+            : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
         size: 24,
       ),
       title: Text(
@@ -375,7 +576,9 @@ class _StudentScreenState extends State<StudentScreen> {
         style: TextStyle(
           fontSize: 16,
           fontWeight: FontWeight.w500,
-          color: isDestructive ? Colors.redAccent : (isDark ? Colors.white : const Color(0xFF1E293B)),
+          color: isDestructive
+              ? Colors.redAccent
+              : (isDark ? Colors.white : const Color(0xFF1E293B)),
         ),
       ),
       trailing: isDestructive
@@ -383,7 +586,9 @@ class _StudentScreenState extends State<StudentScreen> {
           : Icon(
               Icons.chevron_right,
               size: 20,
-              color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade400,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.3)
+                  : Colors.grey.shade400,
             ),
       onTap: onTap,
       hoverColor: Colors.white.withValues(alpha: 0.05),
@@ -405,7 +610,7 @@ class _StudentScreenState extends State<StudentScreen> {
 
   void _showLogoutDialog(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -419,19 +624,22 @@ class _StudentScreenState extends State<StudentScreen> {
             SizedBox(width: 12),
             Text(
               'Logout',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ],
         ),
         content: Text(
           'Are you sure you want to logout?',
-          style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+          style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+              foregroundColor:
+                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             ),
             child: const Text('Cancel'),
           ),
@@ -440,6 +648,7 @@ class _StudentScreenState extends State<StudentScreen> {
               Navigator.pop(context);
               context.read<AuthCubit>().logout();
               context.read<DataCubit>().clearData();
+              WebSocketService.instance.disconnect();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,

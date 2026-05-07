@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:io';
+import 'services/websocket_service.dart';
 import 'core/theme.dart';
 import 'core/api_service.dart';
 import 'cubit/auth/auth_cubit.dart';
@@ -13,22 +14,25 @@ import 'screens/login_screen.dart';
 import 'screens/doctor_screen.dart';
 import 'screens/student_screen.dart';
 
-// Override لتجاوز مشكلة الشهادة self-signed
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
   }
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await ApiService.initToken();
-  
+
   HttpOverrides.global = MyHttpOverrides();
-  
+
+  // Initialize WebSocket connection
+  await WebSocketService.instance.connect();
+
   runApp(const MyApp());
 }
 
@@ -77,7 +81,7 @@ class MyApp extends StatelessWidget {
                           ),
                         );
                       }
-                      
+
                       if (authState.user!.isDoctor) {
                         return const DoctorScreen();
                       } else {
