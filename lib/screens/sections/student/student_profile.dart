@@ -3,16 +3,20 @@
 //   1. QR Code — الـ API بترجع الداتا في qrCode.encoded/raw مش qr_data
 //   2. صورة البروفايل — take photo / choose from gallery / view photo
 //   3. orElse fix
+//   4. Change Password — منع استخدام نفس الباسوورد القديم
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../widgets/toast_message.dart';
 import '../../../core/api_service.dart';
+import '../../../core/constants.dart';
 import '../../../core/helpers.dart';
 
 class StudentProfile extends StatefulWidget {
@@ -95,7 +99,8 @@ class _StudentProfileState extends State<StudentProfile> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 48, height: 4,
+                width: 48,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade400,
@@ -105,7 +110,8 @@ class _StudentProfileState extends State<StudentProfile> {
               Text(
                 'Profile Photo',
                 style: TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : const Color(0xFF1E293B),
                 ),
               ),
@@ -184,7 +190,8 @@ class _StudentProfileState extends State<StudentProfile> {
       title: Text(
         label,
         style: TextStyle(
-          fontSize: 15, fontWeight: FontWeight.w500,
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
           color: isDark ? Colors.white : const Color(0xFF1E293B),
         ),
       ),
@@ -204,11 +211,13 @@ class _StudentProfileState extends State<StudentProfile> {
       if (pickedFile != null && mounted) {
         setState(() => _profileImagePath = pickedFile.path);
         await _saveProfileImagePath(pickedFile.path);
-        if (mounted) ToastMessage.showSuccess(context, 'Profile photo updated!');
+        if (mounted)
+          ToastMessage.showSuccess(context, 'Profile photo updated!');
       }
     } catch (e) {
       if (mounted) {
-        ToastMessage.showError(context, 'Failed to pick image: ${e.toString()}');
+        ToastMessage.showError(
+            context, 'Failed to pick image: ${e.toString()}');
       }
     }
   }
@@ -286,15 +295,31 @@ class _StudentProfileState extends State<StudentProfile> {
   }
 
   // ============================================
-  // Change Password
+  // Change Password — ✅ مع التحقق من عدم استخدام نفس الباسوورد
   // ============================================
 
   Future<void> _changePassword() async {
-    if (_newPasswordController.text != _confirmPasswordController.text) {
+    final currentPassword = _currentPasswordController.text;
+    final newPassword = _newPasswordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+
+    // ✅ 1. التحقق من أن الباسوورد الجديد مختلف عن القديم
+    if (newPassword == currentPassword) {
+      ToastMessage.showError(
+        context,
+        'Please choose a different password than your current one',
+      );
+      return;
+    }
+
+    // ✅ 2. التحقق من تطابق الباسوورد الجديد مع تأكيده
+    if (newPassword != confirmPassword) {
       ToastMessage.showError(context, 'New passwords do not match');
       return;
     }
-    if (_newPasswordController.text.length < 4) {
+
+    // ✅ 3. التحقق من طول الباسوورد الجديد
+    if (newPassword.length < 4) {
       ToastMessage.showError(context, 'Password must be at least 4 characters');
       return;
     }
@@ -322,8 +347,20 @@ class _StudentProfileState extends State<StudentProfile> {
         return;
       }
 
+      // ✅ 4. التحقق من أن الباسوورد الحالي صحيح
+      final isValidCurrent =
+          await _verifyCurrentPassword(studentId, currentPassword);
+
+      if (!isValidCurrent) {
+        if (!mounted) return;
+        ToastMessage.showError(context, 'Current password is incorrect');
+        return;
+      }
+
       final response = await ApiService.changeStudentPassword(
-        studentId, _newPasswordController.text, token,
+        studentId,
+        newPassword,
+        token,
       );
 
       if (!mounted) return;
@@ -335,13 +372,37 @@ class _StudentProfileState extends State<StudentProfile> {
         _confirmPasswordController.clear();
         setState(() => _showPasswordFields = false);
       } else {
-        ToastMessage.showError(context, response['error'] ?? 'Failed to change password');
+        ToastMessage.showError(
+            context, response['error'] ?? 'Failed to change password');
       }
     } catch (e) {
       if (!mounted) return;
       ToastMessage.showError(context, 'Error: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isChangingPassword = false);
+    }
+  }
+
+  /// ✅ دالة للتحقق من صحة الباسوورد الحالي
+  Future<bool> _verifyCurrentPassword(
+      String studentId, String currentPassword) async {
+    try {
+      final response = await http.post(
+        Uri.parse(
+            '${AppConstants.baseUrl}${AppConstants.studentLoginEndpoint}'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': studentId,
+          'password': currentPassword,
+          'isFirstLogin': false,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      print('Error verifying password: $e');
+      return false;
     }
   }
 
@@ -357,7 +418,10 @@ class _StudentProfileState extends State<StudentProfile> {
     final user = authState.user;
 
     final student = (user != null)
-        ? findStudentSafely(userId: user.id, username: user.username, students: dataState.students)
+        ? findStudentSafely(
+            userId: user.id,
+            username: user.username,
+            students: dataState.students)
         : null;
 
     return SingleChildScrollView(
@@ -372,14 +436,18 @@ class _StudentProfileState extends State<StudentProfile> {
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: [
                       Theme.of(context).cardColor.withValues(alpha: 0.95),
                       Theme.of(context).cardColor,
                     ],
                   ),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200),
+                  border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.grey.shade200),
                 ),
                 child: Column(
                   children: [
@@ -390,15 +458,20 @@ class _StudentProfileState extends State<StudentProfile> {
                         alignment: Alignment.bottomRight,
                         children: [
                           Container(
-                            width: 100, height: 100,
+                            width: 100,
+                            height: 100,
                             decoration: BoxDecoration(
                               gradient: _profileImagePath == null
-                                  ? LinearGradient(colors: [Theme.of(context).primaryColor, const Color(0xFF6366F1)])
+                                  ? LinearGradient(colors: [
+                                      Theme.of(context).primaryColor,
+                                      const Color(0xFF6366F1)
+                                    ])
                                   : null,
                               shape: BoxShape.circle,
                               image: _profileImagePath != null
                                   ? DecorationImage(
-                                      image: FileImage(File(_profileImagePath!)),
+                                      image:
+                                          FileImage(File(_profileImagePath!)),
                                       fit: BoxFit.cover,
                                     )
                                   : null,
@@ -406,8 +479,13 @@ class _StudentProfileState extends State<StudentProfile> {
                             child: _profileImagePath == null
                                 ? Center(
                                     child: Text(
-                                      (student?.name.isNotEmpty ?? false) ? student!.name[0].toUpperCase() : 'S',
-                                      style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
+                                      (student?.name.isNotEmpty ?? false)
+                                          ? student!.name[0].toUpperCase()
+                                          : 'S',
+                                      style: const TextStyle(
+                                          fontSize: 40,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white),
                                     ),
                                   )
                                 : null,
@@ -417,24 +495,32 @@ class _StudentProfileState extends State<StudentProfile> {
                             decoration: BoxDecoration(
                               color: Theme.of(context).primaryColor,
                               shape: BoxShape.circle,
-                              border: Border.all(color: Theme.of(context).cardColor, width: 3),
+                              border: Border.all(
+                                  color: Theme.of(context).cardColor, width: 3),
                             ),
-                            child: const Icon(Icons.camera_alt, color: Colors.white, size: 14),
+                            child: const Icon(Icons.camera_alt,
+                                color: Colors.white, size: 14),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Text(student?.name ?? user?.name ?? 'Student', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    Text(student?.name ?? user?.name ?? 'Student',
+                        style: const TextStyle(
+                            fontSize: 22, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    Text(student?.studentId ?? user?.username ?? '', style: TextStyle(fontSize: 14, color: Theme.of(context).hintColor)),
+                    Text(student?.studentId ?? user?.username ?? '',
+                        style: TextStyle(
+                            fontSize: 14, color: Theme.of(context).hintColor)),
                     const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        _buildInfoChip(Icons.school, 'Level ${student?.level ?? '?'}'),
+                        _buildInfoChip(
+                            Icons.school, 'Level ${student?.level ?? '?'}'),
                         const SizedBox(width: 12),
-                        _buildInfoChip(Icons.apartment, student?.department ?? 'N/A'),
+                        _buildInfoChip(
+                            Icons.apartment, student?.department ?? 'N/A'),
                       ],
                     ),
                   ],
@@ -448,15 +534,25 @@ class _StudentProfileState extends State<StudentProfile> {
                 title: 'My QR Code',
                 child: Column(
                   children: [
-                    if (_showQRCode && _qrCodeData != null && _qrCodeData!.isNotEmpty) ...[
+                    if (_showQRCode &&
+                        _qrCodeData != null &&
+                        _qrCodeData!.isNotEmpty) ...[
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                        child: QrImageView(data: _qrCodeData!, version: QrVersions.auto, size: 200),
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16)),
+                        child: QrImageView(
+                            data: _qrCodeData!,
+                            version: QrVersions.auto,
+                            size: 200),
                       ),
                       const SizedBox(height: 12),
                       TextButton.icon(
-                        onPressed: () => setState(() { _showQRCode = false; _qrCodeData = null; }),
+                        onPressed: () => setState(() {
+                          _showQRCode = false;
+                          _qrCodeData = null;
+                        }),
                         icon: const Icon(Icons.close, size: 18),
                         label: const Text('Hide QR Code'),
                       ),
@@ -466,13 +562,19 @@ class _StudentProfileState extends State<StudentProfile> {
                         child: ElevatedButton.icon(
                           onPressed: _isLoadingQR ? null : _loadQRCode,
                           icon: _isLoadingQR
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
                               : const Icon(Icons.qr_code),
-                          label: Text(_isLoadingQR ? 'Loading...' : 'Show QR Code'),
+                          label: Text(
+                              _isLoadingQR ? 'Loading...' : 'Show QR Code'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Theme.of(context).primaryColor,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
                           ),
                         ),
                       ),
@@ -491,45 +593,79 @@ class _StudentProfileState extends State<StudentProfile> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _showPasswordFields = true),
+                          onPressed: () =>
+                              setState(() => _showPasswordFields = true),
                           icon: const Icon(Icons.edit),
                           label: const Text('Change Password'),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            side: BorderSide(color: Theme.of(context).primaryColor.withValues(alpha: 0.5)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                            side: BorderSide(
+                                color: Theme.of(context)
+                                    .primaryColor
+                                    .withValues(alpha: 0.5)),
                           ),
                         ),
                       )
                     else
                       Column(
                         children: [
-                          _buildPasswordField('Current Password', _currentPasswordController, _obscureCurrent, (v) => setState(() => _obscureCurrent = v)),
+                          _buildPasswordField(
+                              'Current Password',
+                              _currentPasswordController,
+                              _obscureCurrent,
+                              (v) => setState(() => _obscureCurrent = v)),
                           const SizedBox(height: 12),
-                          _buildPasswordField('New Password', _newPasswordController, _obscureNew, (v) => setState(() => _obscureNew = v)),
+                          _buildPasswordField(
+                              'New Password',
+                              _newPasswordController,
+                              _obscureNew,
+                              (v) => setState(() => _obscureNew = v)),
                           const SizedBox(height: 12),
-                          _buildPasswordField('Confirm Password', _confirmPasswordController, _obscureConfirm, (v) => setState(() => _obscureConfirm = v)),
+                          _buildPasswordField(
+                              'Confirm Password',
+                              _confirmPasswordController,
+                              _obscureConfirm,
+                              (v) => setState(() => _obscureConfirm = v)),
                           const SizedBox(height: 16),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton(
-                                  onPressed: () => setState(() => _showPasswordFields = false),
-                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                                  onPressed: () => setState(
+                                      () => _showPasswordFields = false),
+                                  style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14))),
                                   child: const Text('Cancel'),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: _isChangingPassword ? null : _changePassword,
+                                  onPressed: _isChangingPassword
+                                      ? null
+                                      : _changePassword,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Theme.of(context).primaryColor,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    backgroundColor:
+                                        Theme.of(context).primaryColor,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(14)),
                                   ),
                                   child: _isChangingPassword
-                                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      ? const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white))
                                       : const Text('Update'),
                                 ),
                               ),
@@ -564,20 +700,28 @@ class _StudentProfileState extends State<StudentProfile> {
         children: [
           Icon(icon, size: 14, color: Theme.of(context).primaryColor),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12, color: Theme.of(context).primaryColor, fontWeight: FontWeight.w500)),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).primaryColor,
+                  fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 
-  Widget _buildSectionCard({required IconData icon, required String title, required Widget child}) {
+  Widget _buildSectionCard(
+      {required IconData icon, required String title, required Widget child}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200),
+        border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.1)
+                : Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,7 +729,9 @@ class _StudentProfileState extends State<StudentProfile> {
           Row(children: [
             Icon(icon, color: Theme.of(context).primaryColor, size: 20),
             const SizedBox(width: 10),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ]),
           const SizedBox(height: 16),
           child,
@@ -594,14 +740,16 @@ class _StudentProfileState extends State<StudentProfile> {
     );
   }
 
-  Widget _buildPasswordField(String label, TextEditingController controller, bool obscure, ValueChanged<bool> onToggle) {
+  Widget _buildPasswordField(String label, TextEditingController controller,
+      bool obscure, ValueChanged<bool> onToggle) {
     return TextField(
       controller: controller,
       obscureText: obscure,
       decoration: InputDecoration(
         labelText: label,
         suffixIcon: IconButton(
-          icon: Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20),
+          icon:
+              Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20),
           onPressed: () => onToggle(!obscure),
         ),
       ),
@@ -627,7 +775,8 @@ class _FullScreenPhotoViewer extends StatelessWidget {
           icon: const Icon(Icons.close, color: Colors.white, size: 28),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Profile Photo', style: TextStyle(color: Colors.white)),
+        title:
+            const Text('Profile Photo', style: TextStyle(color: Colors.white)),
       ),
       body: Center(
         child: InteractiveViewer(
@@ -638,7 +787,8 @@ class _FullScreenPhotoViewer extends StatelessWidget {
             child: Image.file(
               File(imagePath),
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 80),
+              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+                  color: Colors.white54, size: 80),
             ),
           ),
         ),
