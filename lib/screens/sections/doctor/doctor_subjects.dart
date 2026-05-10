@@ -20,6 +20,59 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
 
   final List<int> _levels = [1, 2, 3, 4];
 
+  Widget _buildLockedScreen(bool isDark) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text('My Subjects'),
+        centerTitle: false,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_rounded,
+                    size: 48, color: Colors.orange),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Subjects are locked',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Your professor has disabled access to subjects. '
+                'Contact them to enable this section.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.6)
+                      : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _refreshSubjects() async {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
@@ -42,8 +95,14 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final user = authState.user;
-    final doctorId = user?.id ?? 0;
+    final doctorId = user?.effectiveDoctorId ?? 0;
     final currentSemester = dataState.currentSemester;
+
+    // 🔒 If a TA's "ta.nav.subjects" permission was revoked by the professor,
+    // open the page but show a locked-state screen instead of subjects.
+    if (user != null && !user.hasTAPermission('ta.nav.subjects')) {
+      return _buildLockedScreen(isDark);
+    }
 
     // جلب المواد الخاصة بالدكتور في الترم الحالي فقط
     List<Subject> doctorSubjects = dataState.subjects

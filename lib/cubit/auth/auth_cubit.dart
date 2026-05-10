@@ -50,8 +50,15 @@ class AuthCubit extends Cubit<AuthState> {
         final Map<String, dynamic> userJson =
             Map<String, dynamic>.from(response[isStudent ? 'student' : 'user']);
 
-        userJson['role'] = isStudent ? 'student' : 'doctor';
-        userJson['userType'] = isStudent ? 'student' : 'doctor';
+        // Preserve role/userType from the server (e.g. 'teaching-assistant');
+        // only fall back to a default if the server omitted them.
+        if (isStudent) {
+          userJson['role'] = 'student';
+          userJson['userType'] = 'student';
+        } else {
+          userJson['role'] ??= 'doctor';
+          userJson['userType'] ??= userJson['role'];
+        }
 
         final user = User.fromJson(userJson);
 
@@ -150,6 +157,35 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  /// Replaces the cached user's permissions in-place. Used when a WebSocket
+  /// event tells us the supervising doctor changed this TA's permissions —
+  /// every widget reading `authState.user.permissions` will rebuild.
+  Future<void> updateUserPermissions(Map<String, dynamic> newPerms) async {
+    final user = state.user;
+    final token = state.token;
+    if (user == null || token == null) return;
+
+    final updated = User(
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      userType: user.userType,
+      supervisorDoctorId: user.supervisorDoctorId,
+      supervisorDoctorName: user.supervisorDoctorName,
+      taId: user.taId,
+      permissions: Map<String, dynamic>.from(newPerms),
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        AppConstants.userDataKey, jsonEncode(updated.toJson()));
+
+    emit(AuthState.success(updated, token));
+    print('🔄 User permissions updated in AuthCubit');
+  }
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(AppConstants.tokenKey);
@@ -164,16 +200,24 @@ class AuthCubit extends Cubit<AuthState> {
   // ✅ دالة لتحديث بيانات المستخدم من السيرفر
   Future<void> refreshUserData() async {
     if (state.user == null || state.token == null) return;
-    
+
     print('🔄 Refreshing user data from server...');
-    
+
+    // 🚫 Never re-resolve TAs against students.json — their numeric id can
+    // collide with a real student id and silently flip the session into a
+    // student session. Just keep the in-memory user as-is.
+    if (state.user!.isTeachingAssistant) {
+      print('ℹ️ Skipping refresh for teaching-assistant — keeping cached user');
+      return;
+    }
+
     try {
       final token = state.token!;
       final userId = state.user!.id;
       final isDoctor = state.user!.isDoctor;
-      
+
       Map<String, dynamic>? freshUserData;
-      
+
       if (isDoctor) {
         final response = await ApiService.getDoctors();
         final doctor = response.firstWhere(

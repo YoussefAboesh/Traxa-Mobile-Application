@@ -6,6 +6,7 @@ import '../../models/subject.dart';
 import '../../models/lecture.dart';
 import '../../models/grade.dart';
 import '../../models/attendance.dart';
+import '../../models/teaching_assistant.dart';
 import '../shared/loading_state.dart';
 
 class DataState extends Equatable {
@@ -18,6 +19,7 @@ class DataState extends Equatable {
   final List<Grade> grades;
   final List<Grade> allGrades;
   final List<AttendanceRecord> attendance;
+  final List<TeachingAssistant> teachingAssistants;
   final LoadingState loadingState;
   final int currentSemester;
   final String currentAcademicYear;
@@ -32,6 +34,7 @@ class DataState extends Equatable {
     this.grades = const [],
     this.allGrades = const [],
     this.attendance = const [],
+    this.teachingAssistants = const [],
     this.loadingState = const LoadingState(),
     this.currentSemester = 1,
     this.currentAcademicYear = '2026-2027',
@@ -47,6 +50,7 @@ class DataState extends Equatable {
     List<Grade>? grades,
     List<Grade>? allGrades,
     List<AttendanceRecord>? attendance,
+    List<TeachingAssistant>? teachingAssistants,
     LoadingState? loadingState,
     int? currentSemester,
     String? currentAcademicYear,
@@ -61,6 +65,7 @@ class DataState extends Equatable {
       grades: grades ?? this.grades,
       allGrades: allGrades ?? this.allGrades,
       attendance: attendance ?? this.attendance,
+      teachingAssistants: teachingAssistants ?? this.teachingAssistants,
       loadingState: loadingState ?? this.loadingState,
       currentSemester: currentSemester ?? this.currentSemester,
       currentAcademicYear: currentAcademicYear ?? this.currentAcademicYear,
@@ -78,6 +83,7 @@ class DataState extends Equatable {
         grades,
         allGrades,
         attendance,
+        teachingAssistants,
         loadingState,
         currentSemester,
         currentAcademicYear,

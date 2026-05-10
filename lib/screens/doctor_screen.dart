@@ -12,6 +12,7 @@ import 'sections/doctor/doctor_overview.dart';
 import 'sections/doctor/doctor_subjects.dart';
 import 'sections/doctor/doctor_attendance.dart';
 import 'sections/doctor/doctor_reports.dart';
+import 'sections/doctor/doctor_ta_management.dart';
 
 class DoctorScreen extends StatefulWidget {
   const DoctorScreen({super.key});
@@ -31,31 +32,26 @@ class _DoctorScreenState extends State<DoctorScreen> {
   // Store the new year from WebSocket
   String _pendingAcademicYear = '';
 
-  final List<Widget> _sections = [
-    const DoctorOverview(),
-    const DoctorSubjects(),
-    const DoctorAttendance(),
-    const DoctorReports(),
+  // Each tab is keyed so we can filter for TA based on permissions.
+  static const _allTabs = [
+    {'key': 'ta.nav.overview', 'label': 'Home', 'icon': Icons.dashboard_rounded},
+    {'key': 'ta.nav.subjects', 'label': 'Subjects', 'icon': Icons.book_rounded},
+    {'key': 'ta.nav.attendance', 'label': 'Attendance', 'icon': Icons.how_to_reg_rounded},
+    {'key': 'ta.nav.reports', 'label': 'Reports', 'icon': Icons.analytics_rounded},
   ];
 
-  final List<BottomNavigationBarItem> _navItems = [
-    const BottomNavigationBarItem(
-      icon: Icon(Icons.dashboard_rounded),
-      label: 'Home',
-    ),
-    const BottomNavigationBarItem(
-      icon: Icon(Icons.book_rounded),
-      label: 'Subjects',
-    ),
-    const BottomNavigationBarItem(
-      icon: Icon(Icons.how_to_reg_rounded),
-      label: 'Attendance',
-    ),
-    const BottomNavigationBarItem(
-      icon: Icon(Icons.analytics_rounded),
-      label: 'Reports',
-    ),
+  static const List<Widget> _allSections = [
+    DoctorOverview(),
+    DoctorSubjects(),
+    DoctorAttendance(),
+    DoctorReports(),
   ];
+
+  List<Map<String, Object>> _visibleTabs(dynamic user) {
+    // Tabs themselves are always visible. Action-level permissions
+    // (ta.attendance.start, ta.reports.export, …) gate the buttons inside.
+    return _allTabs.map((t) => Map<String, Object>.from(t)).toList();
+  }
 
   @override
   void initState() {
@@ -262,6 +258,39 @@ class _DoctorScreenState extends State<DoctorScreen> {
       await _fullReload();
     });
 
+    // ✅ TA permissions changed — only react if it's about the current user.
+    // Updating AuthCubit.user.permissions causes every widget gated by
+    // `hasTAPermission(...)` to rebuild instantly.
+    ws.taPermissionsStream.listen((data) {
+      if (!mounted) return;
+      final user = context.read<AuthCubit>().state.user;
+      if (user == null || !user.isTeachingAssistant) return;
+      final taId = data['taId'];
+      if (taId != user.id) return;
+      final perms = data['permissions'];
+      if (perms is Map) {
+        context
+            .read<AuthCubit>()
+            .updateUserPermissions(Map<String, dynamic>.from(perms));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.shield, color: Colors.white, size: 18),
+                SizedBox(width: 12),
+                Text('Your permissions were updated'),
+              ],
+            ),
+            backgroundColor: const Color(0xFF8B5CF6),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    });
+
     // ✅ General data change
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
@@ -312,7 +341,12 @@ class _DoctorScreenState extends State<DoctorScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(
+        // Wrap the title in FittedBox so the year + semester pills scale
+        // down on narrow phones instead of overflowing the app bar.
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
@@ -375,6 +409,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
               ),
             ),
           ],
+        ),
         ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
@@ -452,8 +487,27 @@ class _DoctorScreenState extends State<DoctorScreen> {
         ],
       ),
       drawer: _buildDrawer(context, doctor, doctorEmail),
-      body: _sections[_selectedIndex],
-      bottomNavigationBar: Container(
+      body: () {
+        final tabs = _visibleTabs(doctor);
+        if (tabs.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No sections enabled. Ask your doctor to grant permissions.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        final idx = _selectedIndex.clamp(0, tabs.length - 1);
+        final key = tabs[idx]['key'];
+        final orig = _allTabs.indexWhere((t) => t['key'] == key);
+        return _allSections[orig >= 0 ? orig : 0];
+      }(),
+      bottomNavigationBar: _visibleTabs(doctor).length < 2
+          ? null
+          : Container(
         decoration: BoxDecoration(
           boxShadow: [
             BoxShadow(
@@ -470,7 +524,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
           ),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
-            currentIndex: _selectedIndex,
+            currentIndex:
+                _selectedIndex.clamp(0, _visibleTabs(doctor).length - 1),
             onTap: (index) {
               setState(() {
                 _selectedIndex = index;
@@ -489,7 +544,12 @@ class _DoctorScreenState extends State<DoctorScreen> {
               fontSize: 12,
             ),
             elevation: 0,
-            items: _navItems,
+            items: _visibleTabs(doctor)
+                .map((t) => BottomNavigationBarItem(
+                      icon: Icon(t['icon'] as IconData),
+                      label: t['label'] as String,
+                    ))
+                .toList(),
           ),
         ),
       ),
@@ -661,9 +721,11 @@ class _DoctorScreenState extends State<DoctorScreen> {
                         color: Colors.white,
                       ),
                       const SizedBox(width: 4),
-                      const Text(
-                        'Professor',
-                        style: TextStyle(
+                      Text(
+                        doctor.isTeachingAssistant
+                            ? 'Teaching Assistant'
+                            : 'Professor',
+                        style: const TextStyle(
                           fontSize: 11,
                           color: Colors.white,
                         ),
@@ -687,6 +749,20 @@ class _DoctorScreenState extends State<DoctorScreen> {
                     setSelectedIndex(3);
                   },
                 ),
+                if (doctor.isDoctor && !doctor.isTeachingAssistant)
+                  _buildDrawerItem(
+                    icon: Icons.shield_outlined,
+                    title: 'TA Management',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DoctorTAManagement(),
+                        ),
+                      );
+                    },
+                  ),
                 _buildDrawerItem(
                   icon: Icons.settings_rounded,
                   title: 'Settings',

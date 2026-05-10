@@ -39,6 +39,11 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   String? _activeSessionId;
   DateTime? _sessionStartTime;
   DateTime? _sessionEndTime;
+  // The actual moment the lecturer pressed "End Lecture (Start QR)".
+  // Distinct from _sessionEndTime, which doubles as the QR phase deadline
+  // (30 minutes later) for the countdown timer. This one is what goes into
+  // the saved report's endTime so the report shows real lecture duration.
+  DateTime? _lectureEndedAt;
   List<Student>? _sessionStudents;
   bool _showStudentList = false;
   bool _isActivating = false;
@@ -126,7 +131,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       final session = data['session'] as Map<String, dynamic>?;
       if (session == null) return;
       final authState = context.read<AuthCubit>().state;
-      if (session['doctorId'] != authState.user?.id) return;
+      if (session['doctorId'] != authState.user?.effectiveDoctorId) return;
       _syncWithServer();
     });
 
@@ -134,7 +139,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       if (!mounted) return;
       final doctorId = data['doctorId'] as int?;
       final authState = context.read<AuthCubit>().state;
-      if (doctorId != authState.user?.id) return;
+      if (doctorId != authState.user?.effectiveDoctorId) return;
       _syncWithServer();
     });
 
@@ -218,7 +223,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       final res = await http
           .get(
             Uri.parse(
-                '${AppConstants.baseUrl}/api/active-sessions/doctor/${auth.user!.id}'),
+                '${AppConstants.baseUrl}/api/active-sessions/doctor/${auth.user!.effectiveDoctorId}'),
             headers: _headers(auth.token!),
           )
           .timeout(const Duration(seconds: 8));
@@ -295,7 +300,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     try {
       final res = await http
           .get(
-            Uri.parse('${AppConstants.baseUrl}/api/active-sessions/doctor/${auth.user!.id}'),
+            Uri.parse('${AppConstants.baseUrl}/api/active-sessions/doctor/${auth.user!.effectiveDoctorId}'),
             headers: _headers(auth.token!),
           )
           .timeout(const Duration(seconds: 5));
@@ -480,7 +485,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             body: jsonEncode({
               'sessionId': sessionId,
               'lectureId': lecture.id,
-              'doctorId': user.id,
+              'doctorId': user.effectiveDoctorId,
               'doctorName': user.name,
               'subjectName': lecture.subjectName,
               'level': lecture.level,
@@ -512,14 +517,14 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'session': {
           'sessionId': sessionId,
           'lectureId': lecture.id,
-          'doctorId': user.id,
+          'doctorId': user.effectiveDoctorId,
           'doctorName': user.name,
           'subjectName': lecture.subjectName,
           'level': lecture.level,
           'department': lecture.department,
           'startTime': now.toIso8601String(),
         },
-        'doctorId': user.id,
+        'doctorId': user.effectiveDoctorId,
         'timestamp': DateTime.now().toIso8601String()
       });
 
@@ -602,11 +607,27 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
         setState(() {
           _phase = SessionPhase.confirming;
+          // ✅ Record the actual end-click moment for the report.
+          _lectureEndedAt = DateTime.now();
           _sessionEndTime = qrEndTime ?? DateTime.now();
           _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
         });
         _startConfirmTimer();
         _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
+      } else if (res.statusCode == 404) {
+        // The server lost track of this session (e.g. it restarted, or another
+        // device ended it first). Treat it as already ended and just clean up
+        // local state instead of confusing the user with a red "Failed 404".
+        setState(() {
+          _phase = SessionPhase.none;
+          _activeSession = null;
+          _activeSessionId = null;
+          _sessionStartTime = null;
+          _sessionEndTime = null;
+          _sessionStudents = null;
+          _isCameraOpen = false;
+        });
+        _snack('Session was already ended on the server', Colors.orange);
       } else {
         _snack('Failed to end session (${res.statusCode})', Colors.red);
       }
@@ -689,16 +710,26 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             };
           }).toList();
 
+      final nowIso = DateTime.now().toIso8601String();
+      // Real lecture end time = when the user pressed End. Falls back to
+      // the QR phase deadline (`_sessionEndTime`) only if for some reason
+      // the click time wasn't captured.
+      final lectureEndIso = (_lectureEndedAt ?? _sessionEndTime ?? DateTime.now())
+          .toIso8601String();
       report = {
         'sessionId': sessionIdSnapshot,
         'lectureId': _activeSession?.id,
-        'doctorId': auth.user?.id,
+        'doctorId': auth.user?.effectiveDoctorId,
         'doctorName': auth.user?.name,
         'subjectName': _activeSession?.subjectName,
         'level': _activeSession?.level,
         'department': _activeSession?.department,
-        'createdAt': _sessionStartTime?.toIso8601String(),
-        'endedAt': _sessionEndTime?.toIso8601String(),
+        // Match the field names the website / server use, so the same JSON
+        // renders identically on both platforms.
+        'startTime': _sessionStartTime?.toIso8601String(),
+        'endTime': lectureEndIso,
+        'createdAt': nowIso,
+        'endedAt': lectureEndIso,
         'totalStudents': sessionStudentsSnapshot.length,
         'presentCount': confirmedSnapshot,
         'pendingCount': pendingSnapshot,
@@ -845,7 +876,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     final url = '${AppConstants.baseUrl}/camera.html'
         '?sessionId=$_activeSessionId'
         '&lectureId=${_activeSession?.id ?? ''}'
-        '&doctorId=${auth.user?.id ?? ''}'
+        '&doctorId=${auth.user?.effectiveDoctorId ?? ''}'
         '&doctorName=${Uri.encodeComponent(auth.user?.name ?? '')}'
         '&token=${auth.token ?? ''}';
 
@@ -1137,7 +1168,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     final currentSemester = dataState.currentSemester;
 
     final user = authState.user;
-    final doctorId = user?.id ?? 0;
+    final doctorId = user?.effectiveDoctorId ?? 0;
 
     // جلب المواد الخاصة بالدكتور في الترم الحالي فقط
     List<Subject> doctorSubjects = dataState.subjects
@@ -1191,16 +1222,44 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                       !_showActiveSessions, () {
                     setState(() => _showActiveSessions = false);
                   }),
-                  _buildTab(
-                    _phase == SessionPhase.confirming ? 'QR Mode' : 'Live',
-                    _phase == SessionPhase.confirming
-                        ? Icons.qr_code
-                        : Icons.qr_code_scanner_rounded,
-                    _showActiveSessions,
-                    () {
-                      setState(() => _showActiveSessions = true);
-                    },
-                  ),
+                  Builder(builder: (ctx) {
+                    final user = ctx.watch<AuthCubit>().state.user;
+                    final liveLocked = user != null &&
+                        !user.hasTAPermission('ta.nav.attendance');
+                    return _buildTab(
+                      _phase == SessionPhase.confirming ? 'QR Mode' : 'Live',
+                      _phase == SessionPhase.confirming
+                          ? Icons.qr_code
+                          : Icons.qr_code_scanner_rounded,
+                      _showActiveSessions && !liveLocked,
+                      () {
+                        if (liveLocked) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.lock_outline,
+                                      color: Colors.white, size: 18),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                        'Active Sessions are locked by your professor'),
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: Colors.orange,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                          return;
+                        }
+                        setState(() => _showActiveSessions = true);
+                      },
+                      locked: liveLocked,
+                    );
+                  }),
                 ],
               ),
             ),
@@ -1216,37 +1275,40 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   Widget _buildTab(
-      String label, IconData icon, bool isActive, VoidCallback onTap) {
+      String label, IconData icon, bool isActive, VoidCallback onTap,
+      {bool locked = false}) {
+    final inactiveColor =
+        _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
+    final fgColor = locked
+        ? Colors.grey
+        : (isActive ? Colors.white : inactiveColor);
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color:
-                isActive ? Theme.of(context).primaryColor : Colors.transparent,
+            color: locked
+                ? Colors.grey.withValues(alpha: 0.15)
+                : (isActive
+                    ? Theme.of(context).primaryColor
+                    : Colors.transparent),
             borderRadius: BorderRadius.circular(36),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon,
-                  size: 16,
-                  color: isActive
-                      ? Colors.white
-                      : (_isDark
-                          ? const Color(0xFF94A3B8)
-                          : Colors.grey.shade600)),
+              Icon(icon, size: 16, color: fgColor),
               const SizedBox(width: 6),
               Text(label,
                   style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: isActive
-                          ? Colors.white
-                          : (_isDark
-                              ? const Color(0xFF94A3B8)
-                              : Colors.grey.shade600))),
+                      color: fgColor)),
+              if (locked) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.lock_rounded, size: 14, color: Colors.grey),
+              ],
             ],
           ),
         ),
@@ -1459,37 +1521,68 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               ],
             ),
           ),
-          ElevatedButton(
-            onPressed: isActive
-                ? (_phase == SessionPhase.active
-                    ? () => _showEndSessionConfirmDialog(lecture)
-                    : null)
-                : (busy || _isActivating
-                    ? null
-                    : () => _showActivateConfirmDialog(lecture)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isActive
-                  ? (_phase == SessionPhase.confirming
-                      ? Colors.orange
-                      : Colors.red)
-                  : (busy ? Colors.grey : Colors.green),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
-            ),
-            child: _isActivating
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : Text(
-                    isActive
-                        ? (_phase == SessionPhase.confirming ? 'QR...' : 'End')
-                        : (busy ? 'Busy' : 'Activate'),
-                    style: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.bold)),
-          ),
+          Builder(builder: (ctx) {
+            final user = ctx.watch<AuthCubit>().state.user;
+            final canStart =
+                user == null || user.hasTAPermission('ta.attendance.start');
+            final canEnd =
+                user == null || user.hasTAPermission('ta.attendance.end');
+            final permLocked = isActive ? !canEnd : !canStart;
+            if (permLocked) {
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_outline, size: 12, color: Colors.grey),
+                    SizedBox(width: 4),
+                    Text('Locked',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey)),
+                  ],
+                ),
+              );
+            }
+            return ElevatedButton(
+              onPressed: isActive
+                  ? (_phase == SessionPhase.active
+                      ? () => _showEndSessionConfirmDialog(lecture)
+                      : null)
+                  : (busy || _isActivating
+                      ? null
+                      : () => _showActivateConfirmDialog(lecture)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isActive
+                    ? (_phase == SessionPhase.confirming
+                        ? Colors.orange
+                        : Colors.red)
+                    : (busy ? Colors.grey : Colors.green),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+              ),
+              child: _isActivating
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : Text(
+                      isActive
+                          ? (_phase == SessionPhase.confirming ? 'QR...' : 'End')
+                          : (busy ? 'Busy' : 'Activate'),
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.bold)),
+            );
+          }),
         ],
       ),
     );

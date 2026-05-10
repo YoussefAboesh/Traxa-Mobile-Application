@@ -55,7 +55,17 @@ class MyApp extends StatelessWidget {
             themeMode: themeState.themeMode,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
-            home: BlocBuilder<AuthCubit, AuthState>(
+            home: BlocConsumer<AuthCubit, AuthState>(
+              // Whenever a session is restored or login succeeds, force a
+              // full data reload so the user lands on a populated screen
+              // instead of having to hit refresh manually.
+              listenWhen: (prev, curr) =>
+                  curr.isAuthenticated &&
+                  curr.user != null &&
+                  (prev.user?.id != curr.user?.id || !prev.isAuthenticated),
+              listener: (context, authState) {
+                context.read<DataCubit>().fullReload();
+              },
               builder: (context, authState) {
                 if (authState.isAuthenticated && authState.user != null) {
                   return BlocBuilder<DataCubit, DataState>(
@@ -82,7 +92,9 @@ class MyApp extends StatelessWidget {
                         );
                       }
 
-                      if (authState.user!.isDoctor) {
+                      // TAs share the doctor portal but with filtered nav.
+                      if (authState.user!.isDoctor ||
+                          authState.user!.isTeachingAssistant) {
                         return const DoctorScreen();
                       } else {
                         return const StudentScreen();

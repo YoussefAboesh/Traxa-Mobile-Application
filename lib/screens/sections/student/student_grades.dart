@@ -315,16 +315,27 @@ class _StudentGradesState extends State<StudentGrades> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 20, color: Colors.white70),
-          const Spacer(),
-          Text(value,
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
+          const SizedBox(height: 6),
+          // Scale the multi-line GPA string down on narrow screens instead
+          // of overflowing the card.
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(value,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white)),
+            ),
+          ),
           const SizedBox(height: 2),
           Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Colors.white70)),
         ],
       ),

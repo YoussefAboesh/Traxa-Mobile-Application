@@ -65,7 +65,7 @@ class _DoctorReportsState extends State<DoctorReports> {
     try {
       final auth = context.read<AuthCubit>().state;
       final token = auth.token;
-      final doctorId = auth.user?.id ?? 0;
+      final doctorId = auth.user?.effectiveDoctorId ?? 0;
       if (token == null) {
         setState(() {
           _error = 'Not authenticated';
@@ -273,8 +273,24 @@ class _DoctorReportsState extends State<DoctorReports> {
     final subjectName =
         report['subjectName'] ?? report['subject_name'] ?? 'Unknown';
     final subjectCode = report['subjectCode'] ?? report['subject_code'] ?? '';
-    final createdAt = report['createdAt'] ?? report['created_at'] ?? '';
-    final endedAt = report['endedAt'] ?? report['ended_at'] ?? '';
+    // 🕒 Always read the real session boundaries:
+    //   start = startTime/start_time (when activate was hit)
+    //   end   = endTime/end_time/endedAt (when end-session was hit)
+    // createdAt is the *report save* timestamp on the server (≈ end), so it
+    // must NOT be used as the start.
+    final startTime = report['startTime'] ??
+        report['start_time'] ??
+        report['startedAt'] ??
+        '';
+    final endTime = report['endTime'] ??
+        report['end_time'] ??
+        report['endedAt'] ??
+        report['ended_at'] ??
+        report['createdAt'] ??
+        report['created_at'] ??
+        '';
+    final dateField =
+        startTime.toString().isNotEmpty ? startTime : (report['date'] ?? endTime);
     final students = report['students'] as List? ?? [];
     final totalStudents =
         report['totalStudents'] ?? report['total_students'] ?? students.length;
@@ -283,9 +299,9 @@ class _DoctorReportsState extends State<DoctorReports> {
         students.where((s) => s['status'] == 'confirmed').length;
     final rate = totalStudents > 0 ? (presentCount / totalStudents * 100) : 0.0;
 
-    final formattedDate = _fmtDate(createdAt);
-    final formattedStart = _fmtTime12(createdAt);
-    final formattedEnd = _fmtTime12(endedAt);
+    final formattedDate = _fmtDate(dateField.toString());
+    final formattedStart = _fmtTime12(startTime.toString());
+    final formattedEnd = _fmtTime12(endTime.toString());
     final presentText = '$presentCount/$totalStudents';
 
     final rateColor = rate >= 75
@@ -368,39 +384,66 @@ class _DoctorReportsState extends State<DoctorReports> {
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showDetails(report),
-                  icon: const Icon(Icons.visibility, size: 18),
-                  label: const Text('View Details'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                    side: BorderSide(
-                        color: Theme.of(context)
-                            .primaryColor
-                            .withValues(alpha: 0.4)),
+          child: Builder(builder: (ctx) {
+            final user = ctx.watch<AuthCubit>().state.user;
+            final canView =
+                user == null || user.hasTAPermission('ta.reports.view');
+            final canExport =
+                user == null || user.hasTAPermission('ta.reports.export');
+
+            if (!canView && !canExport) {
+              return Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                alignment: Alignment.center,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_outline, size: 14, color: Colors.grey),
+                    SizedBox(width: 6),
+                    Text('Actions locked by professor',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              );
+            }
+
+            return Row(
+              children: [
+                if (canView)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showDetails(report),
+                      icon: const Icon(Icons.visibility, size: 18),
+                      label: const Text('View Details'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        side: BorderSide(
+                            color: Theme.of(context)
+                                .primaryColor
+                                .withValues(alpha: 0.4)),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // ✅ Download PDF button
-              OutlinedButton.icon(
-                onPressed: () => _downloadPdf(report),
-                icon: const Icon(Icons.picture_as_pdf, size: 18),
-                label: const Text('PDF'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  side: BorderSide(color: Colors.red.withValues(alpha: 0.5)),
-                ),
-              ),
-            ],
-          ),
+                if (canView && canExport) const SizedBox(width: 12),
+                if (canExport)
+                  // ✅ Download PDF button
+                  OutlinedButton.icon(
+                    onPressed: () => _downloadPdf(report),
+                    icon: const Icon(Icons.picture_as_pdf, size: 18),
+                    label: const Text('PDF'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      side: BorderSide(color: Colors.red.withValues(alpha: 0.5)),
+                    ),
+                  ),
+              ],
+            );
+          }),
         ),
       ]),
     );
@@ -427,8 +470,21 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['subjectName'] ?? report['subject_name'] ?? 'Unknown';
     final students =
         (report['students'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    final createdAt = report['createdAt'] ?? report['created_at'] ?? '';
-    final endedAt = report['endedAt'] ?? report['ended_at'] ?? '';
+    // Match the website: prefer startTime/endTime; createdAt is the
+    // report-saved timestamp and must not be shown as the start.
+    final startTime = (report['startTime'] ??
+            report['start_time'] ??
+            report['startedAt'] ??
+            '')
+        .toString();
+    final endTime = (report['endTime'] ??
+            report['end_time'] ??
+            report['endedAt'] ??
+            report['ended_at'] ??
+            report['createdAt'] ??
+            report['created_at'] ??
+            '')
+        .toString();
 
     final confirmed =
         students.where((s) => s['status'] == 'confirmed').toList();
@@ -466,11 +522,14 @@ class _DoctorReportsState extends State<DoctorReports> {
                         style: const TextStyle(
                             fontSize: 20, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    Text(_fmtFull12(createdAt),
+                    Text(
+                        startTime.isNotEmpty
+                            ? _fmtFull12(startTime)
+                            : _fmtFull12(endTime),
                         style: TextStyle(
                             fontSize: 12, color: Theme.of(context).hintColor)),
-                    if (endedAt.isNotEmpty)
-                      Text('Ended: ${_fmtTime12(endedAt)}',
+                    if (endTime.isNotEmpty)
+                      Text('Ended: ${_fmtTime12(endTime)}',
                           style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).hintColor)),

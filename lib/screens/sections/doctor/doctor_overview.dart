@@ -37,7 +37,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final user = authState.user;
-    final doctorId = user?.id ?? 0;
+    final doctorId = user?.effectiveDoctorId ?? 0;
 
     final doctorSubjects =
         dataState.subjects.where((s) => s.doctorId == doctorId).toList();
@@ -65,22 +65,25 @@ class _DoctorOverviewState extends State<DoctorOverview> {
               pinned: true,
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               flexibleSpace: FlexibleSpaceBar(
-                title: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .primaryColor
-                            .withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
+                title: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.bottomLeft,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .primaryColor
+                              .withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.school_rounded,
+                            color: Theme.of(context).primaryColor, size: 20),
                       ),
-                      child: Icon(Icons.school_rounded,
-                          color: Theme.of(context).primaryColor, size: 20),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
+                      const SizedBox(width: 10),
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -92,15 +95,19 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                                       fontSize: 15,
                                       fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis),
-                          Text('Doctor Portal',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(fontSize: 10)),
+                          Text(
+                            user?.isTeachingAssistant == true
+                                ? 'TA Portal'
+                                : 'Doctor Portal',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontSize: 10),
+                          ),
                         ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 centerTitle: false,
                 titlePadding:

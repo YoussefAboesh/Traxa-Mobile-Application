@@ -29,6 +29,7 @@ class WebSocketService {
   StreamController<Map<String, dynamic>>? _reportSavedController;
   StreamController<List<dynamic>>? _registrationApprovedController;
   StreamController<Map<String, dynamic>>? _levelsPromotedController;
+  StreamController<Map<String, dynamic>>? _taPermissionsController;
 
   // Public getters for streams - ensures listeners never get closed streams
   Stream<Map<String, dynamic>> get dataChangeStream {
@@ -94,6 +95,13 @@ class WebSocketService {
     return _levelsPromotedController!.stream;
   }
 
+  Stream<Map<String, dynamic>> get taPermissionsStream {
+    if (_taPermissionsController == null || _taPermissionsController!.isClosed) {
+      _initStreams();
+    }
+    return _taPermissionsController!.stream;
+  }
+
   WebSocketService._() {
     _initStreams();
   }
@@ -114,7 +122,8 @@ class WebSocketService {
     _reportSavedController = StreamController<Map<String, dynamic>>.broadcast();
     _registrationApprovedController = StreamController<List<dynamic>>.broadcast();
     _levelsPromotedController = StreamController<Map<String, dynamic>>.broadcast();
-    
+    _taPermissionsController = StreamController<Map<String, dynamic>>.broadcast();
+
     print('✅ WebSocket streams initialized');
   }
 
@@ -347,6 +356,14 @@ class WebSocketService {
             print('📢 Academic year changed via DATA_CHANGE ($action): $newYear');
             _persistAcademicYear(newYear.toString());
             _academicYearController?.add(newYear.toString());
+          }
+        }
+        break;
+      case 'teaching-assistant':
+        if (action == 'permissions-updated') {
+          final taData = data['data'] as Map<String, dynamic>?;
+          if (taData != null && _taPermissionsController != null && !_taPermissionsController!.isClosed) {
+            _taPermissionsController?.add(taData);
           }
         }
         break;

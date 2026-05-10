@@ -55,5 +55,18 @@ class User {
 
   bool get isDoctor => role == 'doctor' || userType == 'doctor';
   bool get isStudent => role == 'student' || userType == 'student';
-  bool get isTeachingAssistant => userType == 'teaching-assistant';
+  bool get isTeachingAssistant =>
+      userType == 'teaching-assistant' || role == 'teaching-assistant';
+
+  /// The doctor id whose data this user should see.
+  /// For a doctor → their own id. For a TA → their supervising doctor's id.
+  int get effectiveDoctorId =>
+      isTeachingAssistant ? (supervisorDoctorId ?? id) : id;
+
+  /// True if a TA permission key is granted. Doctors always return true.
+  bool hasTAPermission(String key) {
+    if (!isTeachingAssistant) return true;
+    final v = permissions?[key];
+    return v == true;
+  }
 }

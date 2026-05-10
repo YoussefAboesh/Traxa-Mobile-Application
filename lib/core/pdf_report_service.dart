@@ -35,8 +35,22 @@ class PdfReportService {
       final subjectName = report['subjectName'] ?? 'Unknown Subject';
       final subjectCode = report['subjectCode'] ?? '';
       final doctorName = report['doctorName'] ?? '';
-      final createdAt = report['createdAt'] ?? '';
-      final endedAt = report['endedAt'] ?? '';
+      // Match the website fields: startTime / endTime. createdAt is the
+      // *report-saved* timestamp and must NOT be used as session start.
+      final startTime = (report['startTime'] ??
+              report['start_time'] ??
+              report['startedAt'] ??
+              '')
+          .toString();
+      final endTime = (report['endTime'] ??
+              report['end_time'] ??
+              report['endedAt'] ??
+              report['ended_at'] ??
+              report['createdAt'] ??
+              '')
+          .toString();
+      final createdAt = startTime.isNotEmpty ? startTime : endTime;
+      final endedAt = endTime;
       final totalStudents = report['totalStudents'] ?? 0;
       final presentCount = report['presentCount'] ?? 0;
       final pendingCount = report['pendingCount'] ?? 0;

@@ -7,6 +7,7 @@ import '../../models/subject.dart';
 import '../../models/lecture.dart';
 import '../../models/grade.dart';
 import '../../models/attendance.dart';
+import '../../models/teaching_assistant.dart';
 import 'data_state.dart';
 
 class DataCubit extends Cubit<DataState> {
@@ -97,16 +98,7 @@ class DataCubit extends Cubit<DataState> {
         return subject.semester == _currentSemester;
       }).toList();
 
-      print('=' * 50);
-      print('📅 CURRENT SEMESTER: $_currentSemester');
-      print('📅 CURRENT ACADEMIC YEAR: $_currentAcademicYear');
-      print('📚 SUBJECTS (all): ${allSubjects.length}');
-      print(
-          '📚 SUBJECTS (filtered for S$_currentSemester): ${filteredSubjects.length}');
-      print('🎓 LECTURES (all): ${allLectures.length}');
-      print(
-          '🎓 LECTURES (filtered for S$_currentSemester): ${filteredLectures.length}');
-      print('=' * 50);
+      // (verbose breakdown removed — see "Data loaded" line below)
 
       emit(DataState.loaded(
         students: allStudents,
@@ -119,7 +111,7 @@ class DataCubit extends Cubit<DataState> {
         currentAcademicYear: _currentAcademicYear,
       ));
 
-      print('✅ Data loaded successfully (filtered by Semester $_currentSemester)');
+      print('✅ Data loaded');
     } catch (e) {
       emit(DataState.error('Failed to load data: ${e.toString()}'));
       print('❌ Error loading data: $e');
@@ -156,7 +148,7 @@ class DataCubit extends Cubit<DataState> {
       final allSubjects = results[2].map((j) => Subject.fromJson(j)).toList();
       final allLectures = results[3].map((j) => Lecture.fromJson(j)).toList();
 
-      print('📊 Raw data loaded: Students=${allStudents.length}, Doctors=${allDoctors.length}, Subjects=${allSubjects.length}, Lectures=${allLectures.length}');
+      // verbose count removed
 
       final filteredSubjects =
           allSubjects.where((s) => s.semester == _currentSemester).toList();
@@ -175,12 +167,7 @@ class DataCubit extends Cubit<DataState> {
         return subject.semester == _currentSemester;
       }).toList();
 
-      print('✅ Full reload completed:');
-      print('   Students: ${allStudents.length}');
-      print('   Doctors: ${allDoctors.length}');
-      print('   Subjects: ${allSubjects.length}');
-      print('   Lectures: ${allLectures.length}');
-      print('   Current Academic Year: $_currentAcademicYear');
+      print('✅ Data loaded');
 
       emit(DataState.loaded(
         students: allStudents,
@@ -239,8 +226,8 @@ class DataCubit extends Cubit<DataState> {
 
   Future<void> checkGradesStatus(int studentId, String token) async {
     try {
-      final status = await ApiService.checkGradesStatus(studentId, token);
-      print('📊 Grades Status: $status');
+      await ApiService.checkGradesStatus(studentId, token);
+      print('📊 Grades loaded');
     } catch (e) {
       print('❌ Error checking grades status: $e');
     }
@@ -261,6 +248,44 @@ class DataCubit extends Cubit<DataState> {
 
   void clearData() {
     emit(DataState.initial());
+  }
+
+  Future<void> fetchTAsForDoctor(int doctorId) async {
+    try {
+      final response =
+          await ApiService.getTeachingAssistantsForDoctor(doctorId);
+      final tas = response.map((j) => TeachingAssistant.fromJson(j)).toList();
+      emit(state.copyWith(teachingAssistants: tas));
+      print('👥 TAs loaded for doctor $doctorId: ${tas.length}');
+    } catch (e) {
+      print('❌ Error loading TAs: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchTAPermissions(int taId) async {
+    return await ApiService.getTAPermissions(taId);
+  }
+
+  Future<Map<String, dynamic>> updateTAPermissions(
+      int taId, Map<String, dynamic> permissions) async {
+    final result = await ApiService.updateTAPermissions(taId, permissions);
+    if (result['success'] == true) {
+      final updated = state.teachingAssistants.map((ta) {
+        if (ta.id == taId) {
+          return TeachingAssistant(
+            id: ta.id,
+            name: ta.name,
+            username: ta.username,
+            email: ta.email,
+            supervisorDoctorId: ta.supervisorDoctorId,
+            permissions: permissions,
+          );
+        }
+        return ta;
+      }).toList();
+      emit(state.copyWith(teachingAssistants: updated));
+    }
+    return result;
   }
 
   Future<void> refreshForNewSemester() async {
