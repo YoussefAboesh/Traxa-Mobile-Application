@@ -1,9 +1,4 @@
 // lib/screens/sections/student/student_profile.dart
-// ✅ Fixes:
-//   1. QR Code — الـ API بترجع الداتا في qrCode.encoded/raw مش qr_data
-//   2. صورة البروفايل — take photo / choose from gallery / view photo
-//   3. orElse fix
-//   4. Change Password — منع استخدام نفس الباسوورد القديم
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -46,6 +41,9 @@ class _StudentProfileState extends State<StudentProfile> {
   String? _profileImagePath;
   final ImagePicker _imagePicker = ImagePicker();
 
+  // Refresh
+  bool _isRefreshing = false;
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +56,21 @@ class _StudentProfileState extends State<StudentProfile> {
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshProfile() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      await context.read<DataCubit>().loadAllData();
+    } catch (e) {
+      print('Error refreshing profile: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
   }
 
   // ============================================
@@ -246,7 +259,7 @@ class _StudentProfileState extends State<StudentProfile> {
   }
 
   // ============================================
-  // QR Code — ✅ Fix: قراءة الداتا من الـ structure الصحيح
+  // QR Code
   // ============================================
 
   Future<void> _loadQRCode() async {
@@ -268,11 +281,9 @@ class _StudentProfileState extends State<StudentProfile> {
       if (response['success'] == true && response['qrCode'] != null) {
         final qrCode = response['qrCode'];
 
-        // ✅ Fix: الـ API بترجع encoded و raw مباشرة مش جوه qr_data
         final encodedData = qrCode['encoded'] ?? '';
         final rawData = qrCode['raw'] ?? '';
 
-        // استخدم encoded لو موجود، وإلا raw
         final qrData = encodedData.isNotEmpty ? encodedData : rawData;
 
         if (qrData.isNotEmpty) {
@@ -296,7 +307,7 @@ class _StudentProfileState extends State<StudentProfile> {
   }
 
   // ============================================
-  // Change Password — ✅ مع التحقق من عدم استخدام نفس الباسوورد
+  // Change Password
   // ============================================
 
   Future<void> _changePassword() async {
@@ -304,7 +315,6 @@ class _StudentProfileState extends State<StudentProfile> {
     final newPassword = _newPasswordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    // ✅ 1. التحقق من أن الباسوورد الجديد مختلف عن القديم
     if (newPassword == currentPassword) {
       ToastMessage.showError(
         context,
@@ -313,13 +323,11 @@ class _StudentProfileState extends State<StudentProfile> {
       return;
     }
 
-    // ✅ 2. التحقق من تطابق الباسوورد الجديد مع تأكيده
     if (newPassword != confirmPassword) {
       ToastMessage.showError(context, 'New passwords do not match');
       return;
     }
 
-    // ✅ 3. التحقق من طول الباسوورد الجديد
     if (newPassword.length < 4) {
       ToastMessage.showError(context, 'Password must be at least 4 characters');
       return;
@@ -348,7 +356,6 @@ class _StudentProfileState extends State<StudentProfile> {
         return;
       }
 
-      // ✅ 4. التحقق من أن الباسوورد الحالي صحيح
       final isValidCurrent =
           await _verifyCurrentPassword(studentId, currentPassword);
 
@@ -384,7 +391,6 @@ class _StudentProfileState extends State<StudentProfile> {
     }
   }
 
-  /// ✅ دالة للتحقق من صحة الباسوورد الحالي
   Future<bool> _verifyCurrentPassword(
       String studentId, String currentPassword) async {
     try {
@@ -425,260 +431,267 @@ class _StudentProfileState extends State<StudentProfile> {
             students: dataState.students)
         : null;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: Column(
-            children: [
-              // ===== Profile Card =====
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Theme.of(context).cardColor.withValues(alpha: 0.95),
-                      Theme.of(context).cardColor,
-                    ],
+    return RefreshIndicator(
+      onRefresh: _refreshProfile,
+      color: Theme.of(context).primaryColor,
+      backgroundColor: Theme.of(context).cardColor,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              children: [
+                // ===== Profile Card =====
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Theme.of(context).cardColor.withValues(alpha: 0.95),
+                        Theme.of(context).cardColor,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.grey.shade200),
                   ),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.1)
-                          : Colors.grey.shade200),
-                ),
-                child: Column(
-                  children: [
-                    // ✅ Avatar مع image picker
-                    GestureDetector(
-                      onTap: _showImageOptions,
-                      child: Stack(
-                        alignment: Alignment.bottomRight,
-                        children: [
-                          Container(
-                            width: 100,
-                            height: 100,
-                            decoration: BoxDecoration(
-                              gradient: _profileImagePath == null
-                                  ? LinearGradient(colors: [
-                                      Theme.of(context).primaryColor,
-                                      const Color(0xFF6366F1)
-                                    ])
-                                  : null,
-                              shape: BoxShape.circle,
-                              image: _profileImagePath != null
-                                  ? DecorationImage(
-                                      image:
-                                          FileImage(File(_profileImagePath!)),
-                                      fit: BoxFit.cover,
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onTap: _showImageOptions,
+                        child: Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                gradient: _profileImagePath == null
+                                    ? LinearGradient(colors: [
+                                        Theme.of(context).primaryColor,
+                                        const Color(0xFF6366F1)
+                                      ])
+                                    : null,
+                                shape: BoxShape.circle,
+                                image: _profileImagePath != null
+                                    ? DecorationImage(
+                                        image:
+                                            FileImage(File(_profileImagePath!)),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : null,
+                              ),
+                              child: _profileImagePath == null
+                                  ? Center(
+                                      child: Text(
+                                        (student?.name.isNotEmpty ?? false)
+                                            ? student!.name[0].toUpperCase()
+                                            : 'S',
+                                        style: const TextStyle(
+                                            fontSize: 40,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white),
+                                      ),
                                     )
                                   : null,
                             ),
-                            child: _profileImagePath == null
-                                ? Center(
-                                    child: Text(
-                                      (student?.name.isNotEmpty ?? false)
-                                          ? student!.name[0].toUpperCase()
-                                          : 'S',
-                                      style: const TextStyle(
-                                          fontSize: 40,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).primaryColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: Theme.of(context).cardColor, width: 3),
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).primaryColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: Theme.of(context).cardColor,
+                                    width: 3),
+                              ),
+                              child: const Icon(Icons.camera_alt,
+                                  color: Colors.white, size: 14),
                             ),
-                            child: const Icon(Icons.camera_alt,
-                                color: Colors.white, size: 14),
-                          ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(student?.name ?? user?.name ?? 'Student',
+                          style: const TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(student?.studentId ?? user?.username ?? '',
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: Theme.of(context).hintColor)),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildInfoChip(
+                              Icons.school, 'Level ${student?.level ?? '?'}'),
+                          const SizedBox(width: 12),
+                          _buildInfoChip(
+                              Icons.apartment, student?.department ?? 'N/A'),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(student?.name ?? user?.name ?? 'Student',
-                        style: const TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(student?.studentId ?? user?.username ?? '',
-                        style: TextStyle(
-                            fontSize: 14, color: Theme.of(context).hintColor)),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildInfoChip(
-                            Icons.school, 'Level ${student?.level ?? '?'}'),
-                        const SizedBox(width: 12),
-                        _buildInfoChip(
-                            Icons.apartment, student?.department ?? 'N/A'),
-                      ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              // ===== QR Code Section =====
-              _buildSectionCard(
-                icon: Icons.qr_code_2,
-                title: 'My QR Code',
-                child: Column(
-                  children: [
-                    if (_showQRCode &&
-                        _qrCodeData != null &&
-                        _qrCodeData!.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16)),
-                        child: QrImageView(
-                            data: _qrCodeData!,
-                            version: QrVersions.auto,
-                            size: 200),
-                      ),
-                      const SizedBox(height: 12),
-                      TextButton.icon(
-                        onPressed: () => setState(() {
-                          _showQRCode = false;
-                          _qrCodeData = null;
-                        }),
-                        icon: const Icon(Icons.close, size: 18),
-                        label: const Text('Hide QR Code'),
-                      ),
-                    ] else
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoadingQR ? null : _loadQRCode,
-                          icon: _isLoadingQR
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
-                              : const Icon(Icons.qr_code),
-                          label: Text(
-                              _isLoadingQR ? 'Loading...' : 'Show QR Code'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Theme.of(context).primaryColor,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
+                // ===== QR Code Section =====
+                _buildSectionCard(
+                  icon: Icons.qr_code_2,
+                  title: 'My QR Code',
+                  child: Column(
+                    children: [
+                      if (_showQRCode &&
+                          _qrCodeData != null &&
+                          _qrCodeData!.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16)),
+                          child: QrImageView(
+                              data: _qrCodeData!,
+                              version: QrVersions.auto,
+                              size: 200),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: () => setState(() {
+                            _showQRCode = false;
+                            _qrCodeData = null;
+                          }),
+                          icon: const Icon(Icons.close, size: 18),
+                          label: const Text('Hide QR Code'),
+                        ),
+                      ] else
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoadingQR ? null : _loadQRCode,
+                            icon: _isLoadingQR
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: Colors.white))
+                                : const Icon(Icons.qr_code),
+                            label: Text(
+                                _isLoadingQR ? 'Loading...' : 'Show QR Code'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              // ===== Change Password Section =====
-              _buildSectionCard(
-                icon: Icons.lock,
-                title: 'Change Password',
-                child: Column(
-                  children: [
-                    if (!_showPasswordFields)
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () =>
-                              setState(() => _showPasswordFields = true),
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Change Password'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                            side: BorderSide(
-                                color: Theme.of(context)
-                                    .primaryColor
-                                    .withValues(alpha: 0.5)),
+                // ===== Change Password Section =====
+                _buildSectionCard(
+                  icon: Icons.lock,
+                  title: 'Change Password',
+                  child: Column(
+                    children: [
+                      if (!_showPasswordFields)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () =>
+                                setState(() => _showPasswordFields = true),
+                            icon: const Icon(Icons.edit),
+                            label: const Text('Change Password'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                              side: BorderSide(
+                                  color: Theme.of(context)
+                                      .primaryColor
+                                      .withValues(alpha: 0.5)),
+                            ),
                           ),
-                        ),
-                      )
-                    else
-                      Column(
-                        children: [
-                          _buildPasswordField(
-                              'Current Password',
-                              _currentPasswordController,
-                              _obscureCurrent,
-                              (v) => setState(() => _obscureCurrent = v)),
-                          const SizedBox(height: 12),
-                          _buildPasswordField(
-                              'New Password',
-                              _newPasswordController,
-                              _obscureNew,
-                              (v) => setState(() => _obscureNew = v)),
-                          const SizedBox(height: 12),
-                          _buildPasswordField(
-                              'Confirm Password',
-                              _confirmPasswordController,
-                              _obscureConfirm,
-                              (v) => setState(() => _obscureConfirm = v)),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () => setState(
-                                      () => _showPasswordFields = false),
-                                  style: OutlinedButton.styleFrom(
+                        )
+                      else
+                        Column(
+                          children: [
+                            _buildPasswordField(
+                                'Current Password',
+                                _currentPasswordController,
+                                _obscureCurrent,
+                                (v) => setState(() => _obscureCurrent = v)),
+                            const SizedBox(height: 12),
+                            _buildPasswordField(
+                                'New Password',
+                                _newPasswordController,
+                                _obscureNew,
+                                (v) => setState(() => _obscureNew = v)),
+                            const SizedBox(height: 12),
+                            _buildPasswordField(
+                                'Confirm Password',
+                                _confirmPasswordController,
+                                _obscureConfirm,
+                                (v) => setState(() => _obscureConfirm = v)),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () => setState(
+                                        () => _showPasswordFields = false),
+                                    style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 14),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(14))),
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: _isChangingPassword
+                                        ? null
+                                        : _changePassword,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          Theme.of(context).primaryColor,
                                       padding: const EdgeInsets.symmetric(
                                           vertical: 14),
                                       shape: RoundedRectangleBorder(
                                           borderRadius:
-                                              BorderRadius.circular(14))),
-                                  child: const Text('Cancel'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: _isChangingPassword
-                                      ? null
-                                      : _changePassword,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        Theme.of(context).primaryColor,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 14),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(14)),
+                                              BorderRadius.circular(14)),
+                                    ),
+                                    child: _isChangingPassword
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white))
+                                        : const Text('Update'),
                                   ),
-                                  child: _isChangingPassword
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white))
-                                      : const Text('Update'),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                  ],
+                              ],
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 80),
-            ],
+                const SizedBox(height: 80),
+              ],
+            ),
           ),
         ),
       ),

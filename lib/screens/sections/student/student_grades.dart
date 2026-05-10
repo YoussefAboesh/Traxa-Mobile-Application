@@ -21,11 +21,37 @@ class _StudentGradesState extends State<StudentGrades> {
   int _selectedLevel = 0;
   final List<int> _levels = [1, 2, 3, 4];
   final Map<String, Map<String, double>> _distributionsCache = {};
+  bool _isRefreshing = false;
 
   String getSemesterLabel() {
     if (_selectedSemester == 1) return 'S1';
     if (_selectedSemester == 2) return 'S2';
     return 'All';
+  }
+
+  Future<void> _refreshGrades() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      final authState = context.read<AuthCubit>().state;
+      final user = authState.user;
+
+      if (user != null && authState.token != null) {
+        await context.read<DataCubit>().loadStudentGradesWithToken(
+              user.id,
+              authState.token!,
+            );
+        // ignore: use_build_context_synchronously
+        await context.read<DataCubit>().loadAllData();
+      }
+    } catch (e) {
+      print('Error refreshing grades: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
   }
 
   @override
@@ -80,187 +106,194 @@ class _StudentGradesState extends State<StudentGrades> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            title: const Text('My Grades'),
-            centerTitle: false,
-            floating: true,
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          ),
+      body: RefreshIndicator(
+        onRefresh: _refreshGrades,
+        color: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).cardColor,
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              title: const Text('My Grades'),
+              centerTitle: false,
+              floating: true,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            ),
 
-          // Stats Cards
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.6,
-              ),
-              delegate: SliverChildListDelegate([
-                _buildStatCard(
-                  title: 'GPA',
-                  value:
-                      '${getSemesterLabel()}: ${semesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
-                  icon: Icons.trending_up,
-                  color: const Color(0xFF8B5CF6),
+            // Stats Cards
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.6,
                 ),
-                _buildStatCard(
-                    title: 'Total Credits',
-                    value: totalCredits.toString(),
-                    icon: Icons.credit_card,
-                    color: const Color(0xFF10B981)),
-                _buildStatCard(
-                    title: 'Subjects Passed',
-                    value: subjectsPassed.toString(),
-                    icon: Icons.check_circle,
-                    color: const Color(0xFF34D399)),
-                _buildStatCard(
-                    title: 'Subjects Failed',
-                    value: subjectsFailed.toString(),
-                    icon: Icons.cancel,
-                    color: const Color(0xFFF87171)),
-              ]),
-            ),
-          ),
-
-          // Filters Row
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.1)
-                        : Colors.grey.shade200),
-              ),
-              child: Row(
-                children: [
-                  // Semester Filter (Student can choose any semester)
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.1)
-                                : Colors.grey.shade200),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<int>(
-                          value: _selectedSemester,
-                          isExpanded: true,
-                          dropdownColor: Theme.of(context).cardColor,
-                          style: TextStyle(
-                              color: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF1E293B),
-                              fontSize: 13),
-                          icon: Icon(Icons.filter_list,
-                              color: Theme.of(context).primaryColor, size: 18),
-                          items: const [
-                            DropdownMenuItem(
-                                value: 0, child: Text('All Semesters')),
-                            DropdownMenuItem(
-                                value: 1, child: Text('Semester 1')),
-                            DropdownMenuItem(
-                                value: 2, child: Text('Semester 2')),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => _selectedSemester = value ?? 0),
-                        ),
-                      ),
-                    ),
+                delegate: SliverChildListDelegate([
+                  _buildStatCard(
+                    title: 'GPA',
+                    value:
+                        '${getSemesterLabel()}: ${semesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
+                    icon: Icons.trending_up,
+                    color: const Color(0xFF8B5CF6),
                   ),
-                  const SizedBox(width: 12),
-                  // Level Filter
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.1)
-                                : Colors.grey.shade200),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<int>(
-                          value: _selectedLevel,
-                          isExpanded: true,
-                          dropdownColor: Theme.of(context).cardColor,
-                          style: TextStyle(
-                              color: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF1E293B),
-                              fontSize: 13),
-                          icon: Icon(Icons.layers,
-                              color: Theme.of(context).primaryColor, size: 18),
-                          items: [
-                            const DropdownMenuItem(
-                                value: 0, child: Text('All Levels')),
-                            ..._levels.map((l) => DropdownMenuItem(
-                                value: l, child: Text('Level $l'))),
-                          ],
-                          onChanged: (value) =>
-                              setState(() => _selectedLevel = value ?? 0),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  _buildStatCard(
+                      title: 'Total Credits',
+                      value: totalCredits.toString(),
+                      icon: Icons.credit_card,
+                      color: const Color(0xFF10B981)),
+                  _buildStatCard(
+                      title: 'Subjects Passed',
+                      value: subjectsPassed.toString(),
+                      icon: Icons.check_circle,
+                      color: const Color(0xFF34D399)),
+                  _buildStatCard(
+                      title: 'Subjects Failed',
+                      value: subjectsFailed.toString(),
+                      icon: Icons.cancel,
+                      color: const Color(0xFFF87171)),
+                ]),
               ),
             ),
-          ),
 
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-          // Grades List
-          if (filteredGrades.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+            // Filters Row
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.grey.shade200),
+                ),
+                child: Row(
                   children: [
-                    Icon(Icons.school, size: 64, color: Colors.grey.shade400),
-                    const SizedBox(height: 16),
-                    Text('No grades found',
-                        style: TextStyle(
-                            fontSize: 16, color: Colors.grey.shade500)),
-                    const SizedBox(height: 8),
-                    Text('Try changing the filters',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade400)),
+                    // Semester Filter (Student can choose any semester)
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.1)
+                                  : Colors.grey.shade200),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<int>(
+                            value: _selectedSemester,
+                            isExpanded: true,
+                            dropdownColor: Theme.of(context).cardColor,
+                            style: TextStyle(
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF1E293B),
+                                fontSize: 13),
+                            icon: Icon(Icons.filter_list,
+                                color: Theme.of(context).primaryColor,
+                                size: 18),
+                            items: const [
+                              DropdownMenuItem(
+                                  value: 0, child: Text('All Semesters')),
+                              DropdownMenuItem(
+                                  value: 1, child: Text('Semester 1')),
+                              DropdownMenuItem(
+                                  value: 2, child: Text('Semester 2')),
+                            ],
+                            onChanged: (value) =>
+                                setState(() => _selectedSemester = value ?? 0),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Level Filter
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.1)
+                                  : Colors.grey.shade200),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<int>(
+                            value: _selectedLevel,
+                            isExpanded: true,
+                            dropdownColor: Theme.of(context).cardColor,
+                            style: TextStyle(
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF1E293B),
+                                fontSize: 13),
+                            icon: Icon(Icons.layers,
+                                color: Theme.of(context).primaryColor,
+                                size: 18),
+                            items: [
+                              const DropdownMenuItem(
+                                  value: 0, child: Text('All Levels')),
+                              ..._levels.map((l) => DropdownMenuItem(
+                                  value: l, child: Text('Level $l'))),
+                            ],
+                            onChanged: (value) =>
+                                setState(() => _selectedLevel = value ?? 0),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: _buildGradeCard(filteredGrades[index], allSubjects),
-                ),
-                childCount: filteredGrades.length,
-              ),
             ),
 
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
-        ],
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+            // Grades List
+            if (filteredGrades.isEmpty)
+              SliverFillRemaining(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.school, size: 64, color: Colors.grey.shade400),
+                      const SizedBox(height: 16),
+                      Text('No grades found',
+                          style: TextStyle(
+                              fontSize: 16, color: Colors.grey.shade500)),
+                      const SizedBox(height: 8),
+                      Text('Try changing the filters',
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey.shade400)),
+                    ],
+                  ),
+                ),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: _buildGradeCard(filteredGrades[index], allSubjects),
+                  ),
+                  childCount: filteredGrades.length,
+                ),
+              ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          ],
+        ),
       ),
     );
   }

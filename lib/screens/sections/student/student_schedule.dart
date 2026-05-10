@@ -19,6 +19,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
   int _selectedTab = 0;
   String _searchQuery = '';
   String _selectedDay = '';
+  bool _isRefreshing = false;
 
   final List<String> _days = [
     'Saturday',
@@ -28,6 +29,21 @@ class _StudentScheduleState extends State<StudentSchedule> {
     'Wednesday',
     'Thursday'
   ];
+
+  Future<void> _refreshSchedule() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      await context.read<DataCubit>().loadAllData();
+    } catch (e) {
+      print('Error refreshing schedule: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
+  }
 
   List<Subject> getFilteredSubjects(
       Student? student, List<Subject> allSubjects, int currentSemester) {
@@ -119,144 +135,153 @@ class _StudentScheduleState extends State<StudentSchedule> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
-        slivers: [
-          // Tab Bar
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.05)
-                    : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(40),
-              ),
-              child: Row(
-                children: [
-                  _buildTabButton(0, 'Subjects', Icons.book_rounded, isDark),
-                  _buildTabButton(
-                      1, 'Lectures', Icons.calendar_today_rounded, isDark),
-                ],
+      body: RefreshIndicator(
+        onRefresh: _refreshSchedule,
+        color: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).cardColor,
+        child: CustomScrollView(
+          slivers: [
+            // Tab Bar
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(40),
+                ),
+                child: Row(
+                  children: [
+                    _buildTabButton(0, 'Subjects', Icons.book_rounded, isDark),
+                    _buildTabButton(
+                        1, 'Lectures', Icons.calendar_today_rounded, isDark),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          // Filters
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                children: [
-                  // Semester info banner
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .primaryColor
-                          .withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.info_outline,
-                            size: 16, color: Theme.of(context).primaryColor),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Showing subjects for Semester $currentSemester',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).primaryColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Search
-                  TextField(
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    style: TextStyle(
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
-                        fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: _selectedTab == 0
-                          ? 'Search subjects...'
-                          : 'Search lectures...',
-                      hintStyle: TextStyle(
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : Colors.grey.shade500,
-                          fontSize: 13),
-                      prefixIcon: Icon(Icons.search,
-                          color: Theme.of(context).primaryColor, size: 20),
-                      filled: true,
-                      fillColor: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.grey.shade100,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Day filter (for lectures)
-                  if (_selectedTab == 1)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(16),
+            // Filters
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    // Semester info banner
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .primaryColor
+                            .withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 16, color: Theme.of(context).primaryColor),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Showing subjects for Semester $currentSemester',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).primaryColor,
                             ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value:
-                                    _selectedDay.isEmpty ? null : _selectedDay,
-                                hint: const Text('All Days',
-                                    style: TextStyle(fontSize: 13)),
-                                isExpanded: true,
-                                dropdownColor: Theme.of(context).cardColor,
-                                style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white
-                                        : const Color(0xFF1E293B),
-                                    fontSize: 13),
-                                items: [
-                                  const DropdownMenuItem(
-                                      value: '', child: Text('All Days')),
-                                  ..._days.map((d) => DropdownMenuItem(
-                                      value: d, child: Text(d))),
-                                ],
-                                onChanged: (v) =>
-                                    setState(() => _selectedDay = v ?? ''),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Search
+                    TextField(
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                      style: TextStyle(
+                          color:
+                              isDark ? Colors.white : const Color(0xFF1E293B),
+                          fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: _selectedTab == 0
+                            ? 'Search subjects...'
+                            : 'Search lectures...',
+                        hintStyle: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : Colors.grey.shade500,
+                            fontSize: 13),
+                        prefixIcon: Icon(Icons.search,
+                            color: Theme.of(context).primaryColor, size: 20),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.grey.shade100,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Day filter (for lectures)
+                    if (_selectedTab == 1)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _selectedDay.isEmpty
+                                      ? null
+                                      : _selectedDay,
+                                  hint: const Text('All Days',
+                                      style: TextStyle(fontSize: 13)),
+                                  isExpanded: true,
+                                  dropdownColor: Theme.of(context).cardColor,
+                                  style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF1E293B),
+                                      fontSize: 13),
+                                  items: [
+                                    const DropdownMenuItem(
+                                        value: '', child: Text('All Days')),
+                                    ..._days.map((d) => DropdownMenuItem(
+                                        value: d, child: Text(d))),
+                                  ],
+                                  onChanged: (v) =>
+                                      setState(() => _selectedDay = v ?? ''),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  const SizedBox(height: 16),
-                ],
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          // Content
-          if (_selectedTab == 0)
-            _buildSubjectsContent(semester1Subjects, semester2Subjects, isDark)
-          else
-            _buildLecturesContent(lecturesByDay),
-        ],
+            // Content
+            if (_selectedTab == 0)
+              _buildSubjectsContent(
+                  semester1Subjects, semester2Subjects, isDark)
+            else
+              _buildLecturesContent(lecturesByDay),
+          ],
+        ),
       ),
     );
   }

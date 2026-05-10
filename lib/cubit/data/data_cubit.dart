@@ -13,8 +13,10 @@ class DataCubit extends Cubit<DataState> {
   DataCubit() : super(DataState.initial());
 
   int _currentSemester = 1;
+  String _currentAcademicYear = '2026-2027';
 
   int get currentSemester => _currentSemester;
+  String get currentAcademicYear => _currentAcademicYear;
 
   Future<void> loadCurrentSemester() async {
     try {
@@ -26,6 +28,16 @@ class DataCubit extends Cubit<DataState> {
     }
   }
 
+  Future<void> loadCurrentAcademicYear() async {
+    try {
+      _currentAcademicYear = await ApiService.getCurrentAcademicYear();
+      print('📅 Current academic year loaded: $_currentAcademicYear');
+    } catch (e) {
+      print('❌ Error loading academic year: $e');
+      _currentAcademicYear = '2026-2027';
+    }
+  }
+
   Future<void> loadAllData() async {
     if (state.loadingState.isLoading) return;
 
@@ -33,6 +45,7 @@ class DataCubit extends Cubit<DataState> {
 
     try {
       await loadCurrentSemester();
+      await loadCurrentAcademicYear();
 
       final results = await Future.wait([
         ApiService.getStudents(),
@@ -67,6 +80,7 @@ class DataCubit extends Cubit<DataState> {
 
       print('=' * 50);
       print('📅 CURRENT SEMESTER: $_currentSemester');
+      print('📅 CURRENT ACADEMIC YEAR: $_currentAcademicYear');
       print('📚 SUBJECTS (all): ${allSubjects.length}');
       print(
           '📚 SUBJECTS (filtered for S$_currentSemester): ${filteredSubjects.length}');
@@ -83,13 +97,91 @@ class DataCubit extends Cubit<DataState> {
         allSubjects: allSubjects,
         allLectures: allLectures,
         currentSemester: _currentSemester,
+        currentAcademicYear: _currentAcademicYear,
       ));
 
-      print(
-          '✅ Data loaded successfully (filtered by Semester $_currentSemester)');
+      print('✅ Data loaded successfully (filtered by Semester $_currentSemester)');
     } catch (e) {
       emit(DataState.error('Failed to load data: ${e.toString()}'));
       print('❌ Error loading data: $e');
+    }
+  }
+
+  // ✅ Full reload - fetches all data fresh from server with token check
+  Future<void> fullReload() async {
+    print('🔄 DataCubit: Full reload started...');
+    
+    // ✅ التأكد من وجود توكن صالح قبل البدء
+    final token = ApiService.getToken();
+    if (token == null || token.isEmpty) {
+      print('❌ No valid token available for full reload');
+      emit(DataState.error('Session expired. Please login again.'));
+      return;
+    }
+    
+    try {
+      await loadCurrentSemester();
+      await loadCurrentAcademicYear();
+
+      print('📅 Fetching data for Semester: $_currentSemester, Year: $_currentAcademicYear');
+
+      final results = await Future.wait([
+        ApiService.getStudents(),
+        ApiService.getDoctors(),
+        ApiService.getSubjects(),
+        ApiService.getLectures(),
+      ]);
+
+      final allStudents = results[0].map((j) => Student.fromJson(j)).toList();
+      final allDoctors = results[1].map((j) => Doctor.fromJson(j)).toList();
+      final allSubjects = results[2].map((j) => Subject.fromJson(j)).toList();
+      final allLectures = results[3].map((j) => Lecture.fromJson(j)).toList();
+
+      print('📊 Raw data loaded: Students=${allStudents.length}, Doctors=${allDoctors.length}, Subjects=${allSubjects.length}, Lectures=${allLectures.length}');
+
+      final filteredSubjects =
+          allSubjects.where((s) => s.semester == _currentSemester).toList();
+
+      final filteredLectures = allLectures.where((l) {
+        final subject = allSubjects.firstWhere(
+          (s) => s.id == l.subjectId,
+          orElse: () => Subject(
+              id: 0,
+              name: '',
+              doctorId: 0,
+              doctorName: '',
+              level: 1,
+              semester: 1),
+        );
+        return subject.semester == _currentSemester;
+      }).toList();
+
+      print('✅ Full reload completed:');
+      print('   Students: ${allStudents.length}');
+      print('   Doctors: ${allDoctors.length}');
+      print('   Subjects: ${allSubjects.length}');
+      print('   Lectures: ${allLectures.length}');
+      print('   Current Academic Year: $_currentAcademicYear');
+
+      emit(DataState.loaded(
+        students: allStudents,
+        doctors: allDoctors,
+        subjects: filteredSubjects,
+        lectures: filteredLectures,
+        allSubjects: allSubjects,
+        allLectures: allLectures,
+        currentSemester: _currentSemester,
+        currentAcademicYear: _currentAcademicYear,
+      ));
+    } catch (e) {
+      print('❌ Full reload error: $e');
+      
+      // ✅ في حالة خطأ 401 (Unauthorized)، فلنخرج المستخدم
+      if (e.toString().contains('401') || e.toString().contains('Unauthorized')) {
+        emit(DataState.error('Session expired. Please login again.'));
+      } else {
+        emit(DataState.error('Failed to reload data: ${e.toString()}'));
+      }
     }
   }
 
@@ -99,7 +191,6 @@ class DataCubit extends Cubit<DataState> {
       final response = await ApiService.getStudentGrades(studentId);
       final allGrades = response.map((j) => Grade.fromJson(j)).toList();
 
-      // Store all grades without filtering
       emit(state.copyWith(allGrades: allGrades));
       print('📊 All grades loaded: ${allGrades.length}');
     } catch (e) {
@@ -123,7 +214,6 @@ class DataCubit extends Cubit<DataState> {
     }
   }
 
-  // ✅ Get filtered grades by semester (for display)
   List<Grade> getGradesForSemester(int semester) {
     return state.allGrades.where((g) => g.semester == semester).toList();
   }
@@ -160,7 +250,6 @@ class DataCubit extends Cubit<DataState> {
     await loadAllData();
   }
 
-  // ✅ Update grades from WebSocket
   void updateGrade(Grade updatedGrade) {
     final List<Grade> newGrades = List.from(state.allGrades);
     final index = newGrades.indexWhere((g) => g.id == updatedGrade.id);

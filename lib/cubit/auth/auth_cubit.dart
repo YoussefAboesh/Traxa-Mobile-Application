@@ -24,7 +24,6 @@ class AuthCubit extends Cubit<AuthState> {
         final user = User.fromJson(userJson);
         ApiService.setToken(token);
         emit(AuthState.success(user, token));
-        // Connect WebSocket after auth
         await WebSocketService.instance.connect();
       } catch (e) {
         emit(AuthState.error('Failed to restore session'));
@@ -67,7 +66,6 @@ class AuthCubit extends Cubit<AuthState> {
 
         emit(AuthState.success(user, token));
 
-        // Connect WebSocket after successful login
         await WebSocketService.instance.connect();
       } else {
         emit(AuthState.error(response['error'] ?? 'Login failed'));
@@ -161,5 +159,69 @@ class AuthCubit extends Cubit<AuthState> {
     ApiService.setToken(null);
     WebSocketService.instance.disconnect();
     emit(AuthState.loggedOut());
+  }
+
+  // ✅ دالة لتحديث بيانات المستخدم من السيرفر
+  Future<void> refreshUserData() async {
+    if (state.user == null || state.token == null) return;
+    
+    print('🔄 Refreshing user data from server...');
+    
+    try {
+      final token = state.token!;
+      final userId = state.user!.id;
+      final isDoctor = state.user!.isDoctor;
+      
+      Map<String, dynamic>? freshUserData;
+      
+      if (isDoctor) {
+        final response = await ApiService.getDoctors();
+        final doctor = response.firstWhere(
+          (d) => d['id'] == userId,
+          orElse: () => null,
+        );
+        if (doctor != null) {
+          freshUserData = {
+            'id': doctor['id'],
+            'username': doctor['username'],
+            'name': doctor['name'],
+            'email': doctor['email'],
+            'role': 'doctor',
+            'userType': 'doctor',
+          };
+        }
+      } else {
+        final response = await ApiService.getStudents();
+        final student = response.firstWhere(
+          (s) => s['id'] == userId,
+          orElse: () => null,
+        );
+        if (student != null) {
+          freshUserData = {
+            'id': student['id'],
+            'username': student['student_id'],
+            'name': student['name'],
+            'role': 'student',
+            'userType': 'student',
+            'level': student['level'],
+            'department': student['department'],
+            'academic_year': student['academic_year'],
+          };
+        }
+      }
+      
+      if (freshUserData != null) {
+        final updatedUser = User.fromJson(freshUserData);
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(AppConstants.userDataKey, jsonEncode(updatedUser.toJson()));
+        
+        emit(AuthState.success(updatedUser, token));
+        
+        print('✅ User data refreshed successfully');
+      }
+    } catch (e) {
+      print('❌ Error refreshing user data: $e');
+    }
   }
 }

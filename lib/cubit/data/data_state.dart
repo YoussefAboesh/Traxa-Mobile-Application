@@ -20,6 +20,7 @@ class DataState extends Equatable {
   final List<AttendanceRecord> attendance;
   final LoadingState loadingState;
   final int currentSemester;
+  final String currentAcademicYear;
 
   const DataState({
     this.students = const [],
@@ -33,6 +34,7 @@ class DataState extends Equatable {
     this.attendance = const [],
     this.loadingState = const LoadingState(),
     this.currentSemester = 1,
+    this.currentAcademicYear = '2026-2027',
   });
 
   DataState copyWith({
@@ -47,6 +49,7 @@ class DataState extends Equatable {
     List<AttendanceRecord>? attendance,
     LoadingState? loadingState,
     int? currentSemester,
+    String? currentAcademicYear,
   }) {
     return DataState(
       students: students ?? this.students,
@@ -60,6 +63,7 @@ class DataState extends Equatable {
       attendance: attendance ?? this.attendance,
       loadingState: loadingState ?? this.loadingState,
       currentSemester: currentSemester ?? this.currentSemester,
+      currentAcademicYear: currentAcademicYear ?? this.currentAcademicYear,
     );
   }
 
@@ -75,7 +79,8 @@ class DataState extends Equatable {
         allGrades,
         attendance,
         loadingState,
-        currentSemester
+        currentSemester,
+        currentAcademicYear,
       ];
 
   // Helper methods
@@ -101,7 +106,6 @@ class DataState extends Equatable {
         .toList();
   }
 
-  // ✅ Get grades for a specific semester (student can choose)
   List<Grade> getGradesForStudentAndSemester(int studentId, int semester) {
     return allGrades
         .where((g) =>
@@ -109,7 +113,6 @@ class DataState extends Equatable {
         .toList();
   }
 
-  // ✅ Get all grades for student (all semesters)
   List<Grade> getAllGradesForStudent(int studentId) {
     return allGrades
         .where((g) => g.studentId == studentId && g.isVisible)
@@ -130,6 +133,7 @@ class DataState extends Equatable {
     List<Subject>? allSubjects,
     List<Lecture>? allLectures,
     int? currentSemester,
+    String? currentAcademicYear,
   }) =>
       DataState(
         students: students,
@@ -139,6 +143,7 @@ class DataState extends Equatable {
         allSubjects: allSubjects ?? subjects,
         allLectures: allLectures ?? lectures,
         currentSemester: currentSemester ?? 1,
+        currentAcademicYear: currentAcademicYear ?? '2026-2027',
         loadingState: LoadingState.loaded(),
       );
   factory DataState.error(String message) => DataState(

@@ -1,4 +1,5 @@
 // lib/services/websocket_service.dart
+// ✅ FIX: Improved reconnection and stream handling + Academic Year Support
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
@@ -18,58 +19,126 @@ class WebSocketService {
   int _reconnectAttempts = 0;
   static const int maxReconnectAttempts = 10;
 
-  // ✅ Stream للأحداث المختلفة عشان كل شاشة تستمع لللي يخصها
-  final _dataChangeController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get dataChangeStream =>
-      _dataChangeController.stream;
+  // ✅ Streams are re-initialized on connect, but listeners stay attached
+  StreamController<Map<String, dynamic>>? _dataChangeController;
+  StreamController<int>? _semesterController;
+  StreamController<String>? _academicYearController;
+  StreamController<Map<String, dynamic>>? _gradeUpdateController;
+  StreamController<Map<String, dynamic>>? _sessionActivatedController;
+  StreamController<Map<String, dynamic>>? _sessionEndedController;
+  StreamController<Map<String, dynamic>>? _reportSavedController;
+  StreamController<List<dynamic>>? _registrationApprovedController;
+  StreamController<Map<String, dynamic>>? _levelsPromotedController;
 
-  final _semesterController = StreamController<int>.broadcast();
-  Stream<int> get semesterStream => _semesterController.stream;
+  // Public getters for streams - ensures listeners never get closed streams
+  Stream<Map<String, dynamic>> get dataChangeStream {
+    if (_dataChangeController == null || _dataChangeController!.isClosed) {
+      _initStreams();
+    }
+    return _dataChangeController!.stream;
+  }
+  
+  Stream<int> get semesterStream {
+    if (_semesterController == null || _semesterController!.isClosed) {
+      _initStreams();
+    }
+    return _semesterController!.stream;
+  }
+  
+  Stream<String> get academicYearStream {
+    if (_academicYearController == null || _academicYearController!.isClosed) {
+      _initStreams();
+    }
+    return _academicYearController!.stream;
+  }
+  
+  Stream<Map<String, dynamic>> get gradeUpdateStream {
+    if (_gradeUpdateController == null || _gradeUpdateController!.isClosed) {
+      _initStreams();
+    }
+    return _gradeUpdateController!.stream;
+  }
+  
+  Stream<Map<String, dynamic>> get sessionActivatedStream {
+    if (_sessionActivatedController == null || _sessionActivatedController!.isClosed) {
+      _initStreams();
+    }
+    return _sessionActivatedController!.stream;
+  }
+  
+  Stream<Map<String, dynamic>> get sessionEndedStream {
+    if (_sessionEndedController == null || _sessionEndedController!.isClosed) {
+      _initStreams();
+    }
+    return _sessionEndedController!.stream;
+  }
+  
+  Stream<Map<String, dynamic>> get reportSavedStream {
+    if (_reportSavedController == null || _reportSavedController!.isClosed) {
+      _initStreams();
+    }
+    return _reportSavedController!.stream;
+  }
+  
+  Stream<List<dynamic>> get registrationApprovedStream {
+    if (_registrationApprovedController == null || _registrationApprovedController!.isClosed) {
+      _initStreams();
+    }
+    return _registrationApprovedController!.stream;
+  }
+  
+  Stream<Map<String, dynamic>> get levelsPromotedStream {
+    if (_levelsPromotedController == null || _levelsPromotedController!.isClosed) {
+      _initStreams();
+    }
+    return _levelsPromotedController!.stream;
+  }
 
-  final _academicYearController = StreamController<String>.broadcast();
-  Stream<String> get academicYearStream => _academicYearController.stream;
+  WebSocketService._() {
+    _initStreams();
+  }
 
-  final _gradeUpdateController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get gradeUpdateStream =>
-      _gradeUpdateController.stream;
+  void _initStreams() {
+    // Don't close existing streams if they are still alive
+    if (_dataChangeController != null && !_dataChangeController!.isClosed) {
+      return;
+    }
+    
+    // Create new streams
+    _dataChangeController = StreamController<Map<String, dynamic>>.broadcast();
+    _semesterController = StreamController<int>.broadcast();
+    _academicYearController = StreamController<String>.broadcast();
+    _gradeUpdateController = StreamController<Map<String, dynamic>>.broadcast();
+    _sessionActivatedController = StreamController<Map<String, dynamic>>.broadcast();
+    _sessionEndedController = StreamController<Map<String, dynamic>>.broadcast();
+    _reportSavedController = StreamController<Map<String, dynamic>>.broadcast();
+    _registrationApprovedController = StreamController<List<dynamic>>.broadcast();
+    _levelsPromotedController = StreamController<Map<String, dynamic>>.broadcast();
+    
+    print('✅ WebSocket streams initialized');
+  }
 
-  final _sessionActivatedController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get sessionActivatedStream =>
-      _sessionActivatedController.stream;
-
-  final _sessionEndedController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get sessionEndedStream =>
-      _sessionEndedController.stream;
-
-  final _reportSavedController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get reportSavedStream =>
-      _reportSavedController.stream;
-
-  final _registrationApprovedController =
-      StreamController<List<dynamic>>.broadcast();
-  Stream<List<dynamic>> get registrationApprovedStream =>
-      _registrationApprovedController.stream;
-
-  final _levelsPromotedController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get levelsPromotedStream =>
-      _levelsPromotedController.stream;
-
-  WebSocketService._();
 
   Future<void> connect() async {
-    if (_isConnected) return;
+    // If already connected, don't reconnect
+    if (_isConnected && _channel != null) {
+      print('⚠️ WebSocket already connected');
+      return;
+    }
+
+    // Ensure streams are ready before connection
+    if (_dataChangeController == null || _dataChangeController!.isClosed) {
+      _initStreams();
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     final userData = prefs.getString('user_data');
 
-    if (token == null || userData == null) return;
+    if (token == null || userData == null) {
+      print('⚠️ No token or user data, skipping WebSocket connection');
+      return;
+    }
 
     final user = jsonDecode(userData);
     final userId = user['id'];
@@ -131,86 +200,96 @@ class WebSocketService {
       final data = jsonDecode(message);
       print('📨 WebSocket received: ${data['type']}');
 
-      // بث لكل المستمعين
-      _dataChangeController.add(data);
+      // Add to main data change stream for general listeners
+      if (_dataChangeController != null && !_dataChangeController!.isClosed) {
+        _dataChangeController?.add(data);
+      }
 
       switch (data['type']) {
         case 'CONNECTION_ESTABLISHED':
           print('✅ Connected with ID: ${data['clientId']}');
           break;
-
         case 'REGISTERED':
           print('✅ Registered to WebSocket server');
           break;
-
         case 'PING':
-          sendMessage({
-            'type': 'PONG',
-            'timestamp': DateTime.now().millisecondsSinceEpoch
-          });
+          sendMessage({'type': 'PONG', 'timestamp': DateTime.now().millisecondsSinceEpoch});
           break;
-
         case 'HEARTBEAT_ACK':
           break;
-
         case 'DATA_CHANGE':
           _handleDataChange(data);
           break;
-
         case 'SEMESTER_CHANGED':
           final semester = data['value'] ?? data['semester'];
           if (semester != null) {
             print('📢 Semester changed to: $semester');
-            _semesterController.add(semester as int);
+            if (_semesterController != null && !_semesterController!.isClosed) {
+              _semesterController?.add(semester as int);
+            }
           }
           break;
-
         case 'ACADEMIC_YEAR_CHANGED':
+          // ✅ Handle academic year change from server broadcast
           final year = data['value'] ?? data['academicYear'];
           if (year != null) {
             print('📢 Academic year changed to: $year');
-            _academicYearController.add(year.toString());
+            if (_academicYearController != null && !_academicYearController!.isClosed) {
+              _academicYearController?.add(year.toString());
+            }
           }
           break;
-
         case 'SESSION_ACTIVATED':
           print('📢 Session activated: ${data['session']?['subjectName']}');
-          _sessionActivatedController.add(data);
+          if (_sessionActivatedController != null && !_sessionActivatedController!.isClosed) {
+            _sessionActivatedController?.add(data);
+          }
           break;
-
         case 'SESSION_ENDED':
           print('📢 Session ended: ${data['sessionId']}');
-          _sessionEndedController.add(data);
+          if (_sessionEndedController != null && !_sessionEndedController!.isClosed) {
+            _sessionEndedController?.add(data);
+          }
           break;
-
         case 'REPORT_SAVED':
           print('📢 Report saved for session: ${data['report']?['sessionId']}');
-          _reportSavedController.add(data);
+          if (_reportSavedController != null && !_reportSavedController!.isClosed) {
+            _reportSavedController?.add(data);
+          }
           break;
-
         case 'GRADE_UPDATED':
           print('📢 Grade updated: ${data['subjectId']}');
-          _gradeUpdateController.add(data);
+          if (_gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
+            _gradeUpdateController?.add(data);
+          }
           break;
-
         case 'REGISTRATION_APPROVED':
           final subjects = data['approvedSubjects'] as List?;
           if (subjects != null) {
             print('📢 Registration approved for ${subjects.length} subjects');
-            _registrationApprovedController.add(subjects);
+            if (_registrationApprovedController != null && !_registrationApprovedController!.isClosed) {
+              _registrationApprovedController?.add(subjects);
+            }
           }
           break;
-
         case 'LEVELS_PROMOTED':
           print('📢 Levels promoted');
-          _levelsPromotedController.add(data);
+          if (_levelsPromotedController != null && !_levelsPromotedController!.isClosed) {
+            _levelsPromotedController?.add(data);
+          }
           break;
-
         case 'FULL_SYNC':
           print('📢 Full sync requested');
-          _dataChangeController.add(data);
+          if (_dataChangeController != null && !_dataChangeController!.isClosed) {
+            _dataChangeController?.add(data);
+          }
           break;
-
+        case 'TOKEN_EXPIRED':
+          print('⚠️ Token expired - need to logout');
+          if (_dataChangeController != null && !_dataChangeController!.isClosed) {
+            _dataChangeController?.add({'type': 'TOKEN_EXPIRED'});
+          }
+          break;
         default:
           print('📢 Unknown message type: ${data['type']}');
       }
@@ -222,7 +301,6 @@ class WebSocketService {
   void _handleDataChange(Map<String, dynamic> data) {
     final entity = data['entity'] as String?;
     final action = data['action'] as String?;
-
     print('🔄 Data change: $entity / $action');
 
     switch (entity) {
@@ -230,48 +308,65 @@ class WebSocketService {
         if (action == 'created' || action == 'updated') {
           final gradeData = data['data'] as Map<String, dynamic>?;
           if (gradeData != null) {
-            _gradeUpdateController.add(gradeData);
+            if (_gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
+              _gradeUpdateController?.add(gradeData);
+            }
           }
         }
         break;
-
       case 'academic-settings':
         if (action == 'semester-switched') {
           final settings = data['data'] as Map<String, dynamic>?;
           if (settings != null) {
-            _semesterController.add(settings['newSemester'] as int);
+            if (_semesterController != null && !_semesterController!.isClosed) {
+              _semesterController?.add(settings['newSemester'] as int);
+            }
           }
         }
         break;
-
       case 'academic':
-        if (action == 'levels-promoted') {
-          _levelsPromotedController.add(data);
+        if (action == 'academic-year-changed') {
+          // ✅ Handle academic year change from DATA_CHANGE broadcast
+          final yearData = data['data'] as Map<String, dynamic>?;
+          if (yearData != null) {
+            final newYear = yearData['newYear'] as String?;
+            if (newYear != null) {
+              print('📢 Academic year changed via DATA_CHANGE: $newYear');
+              if (_academicYearController != null && !_academicYearController!.isClosed) {
+                _academicYearController?.add(newYear);
+              }
+            }
+          }
+        } else if (action == 'levels-promoted') {
+          if (_levelsPromotedController != null && !_levelsPromotedController!.isClosed) {
+            _levelsPromotedController?.add(data);
+          }
         }
         break;
-
       case 'registration-request':
         if (action == 'approved') {
           final requestData = data['data'] as Map<String, dynamic>?;
           if (requestData != null) {
             final subjects = requestData['subjects'] as List?;
             if (subjects != null) {
-              _registrationApprovedController.add(subjects);
+              if (_registrationApprovedController != null && !_registrationApprovedController!.isClosed) {
+                _registrationApprovedController?.add(subjects);
+              }
             }
           }
         }
         break;
-
       case 'attendance-session':
         if (action == 'ended') {
           final sessionData = data['data'] as Map<String, dynamic>?;
           if (sessionData != null) {
-            _sessionEndedController.add({
-              'sessionId': sessionData['sessionId'],
-              'doctorId': sessionData['doctorId'],
-              'subjectName': sessionData['subjectName'],
-              'endedAt': sessionData['endedAt']
-            });
+            if (_sessionEndedController != null && !_sessionEndedController!.isClosed) {
+              _sessionEndedController?.add({
+                'sessionId': sessionData['sessionId'],
+                'doctorId': sessionData['doctorId'],
+                'report': sessionData['report']
+              });
+            }
           }
         }
         break;
@@ -290,18 +385,15 @@ class WebSocketService {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (timer) {
-      if (_isConnected) {
-        sendMessage({
-          'type': 'HEARTBEAT',
-          'timestamp': DateTime.now().millisecondsSinceEpoch
-        });
+      if (_isConnected && _channel != null) {
+        sendMessage({'type': 'HEARTBEAT', 'timestamp': DateTime.now().millisecondsSinceEpoch});
       }
     });
   }
 
   void _scheduleReconnect() {
     if (_reconnectAttempts >= maxReconnectAttempts) {
-      print('❌ Max reconnect attempts reached');
+      print('❌ Max reconnect attempts reached, giving up');
       return;
     }
     _reconnectTimer?.cancel();
@@ -314,24 +406,25 @@ class WebSocketService {
   }
 
   void disconnect() {
+    print('🔌 Disconnecting WebSocket manually');
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    
     if (_channel != null) {
-      _channel!.sink.close();
+      try {
+        _channel!.sink.close();
+      } catch (e) {
+        print('Error closing channel: $e');
+      }
+      _channel = null;
     }
+    
     _isConnected = false;
-    print('🔌 WebSocket disconnected manually');
-
-    // إغلاق الـ Streams
-    _dataChangeController.close();
-    _semesterController.close();
-    _academicYearController.close();
-    _gradeUpdateController.close();
-    _sessionActivatedController.close();
-    _sessionEndedController.close();
-    _reportSavedController.close();
-    _registrationApprovedController.close();
-    _levelsPromotedController.close();
+    _reconnectAttempts = 0;
+    
+    // ✅ Don't close streams on disconnect - they will be reused on reconnect
+    // This prevents listeners from being lost
+    print('🔌 WebSocket disconnected manually, streams kept alive');
   }
 
   bool get isConnected => _isConnected;

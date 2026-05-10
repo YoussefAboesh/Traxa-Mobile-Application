@@ -57,6 +57,11 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   bool _didCheckServer = false;
 
+  // ✅ Cache for enrolled students
+  final Map<int, List<Student>> _enrolledStudentsCache = {};
+  final Map<int, DateTime> _cacheTimestamp = {};
+  final Duration _cacheDuration = Duration(minutes: 5);
+
   final List<String> _days = [
     'Saturday',
     'Sunday',
@@ -81,6 +86,27 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     _pollTimer?.cancel();
     _confirmTimer?.cancel();
     super.dispose();
+  }
+
+  // ============================================
+  // Cache Management
+  // ============================================
+  void _clearEnrolledStudentsCache() {
+    _enrolledStudentsCache.clear();
+    _cacheTimestamp.clear();
+    print('🗑️ Enrolled students cache cleared');
+  }
+
+  // ============================================
+  // Refresh Data (Pull-to-Refresh)
+  // ============================================
+  Future<void> _refreshData() async {
+    if (_isActivating) return;
+    _clearEnrolledStudentsCache();
+    setState(() => _didCheckServer = false);
+    await _tryRestoreSession();
+    // ignore: use_build_context_synchronously
+    await context.read<DataCubit>().loadAllData();
   }
 
   // ============================================
@@ -271,10 +297,20 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   // ============================================
-  // Get enrolled students for a subject
+  // Get enrolled students for a subject (WITH CACHE)
   // ============================================
   Future<List<Student>> _getEnrolledStudents(
       int subjectId, String token) async {
+    // Check cache first
+    if (_enrolledStudentsCache.containsKey(subjectId)) {
+      final cacheTime = _cacheTimestamp[subjectId];
+      if (cacheTime != null &&
+          DateTime.now().difference(cacheTime) < _cacheDuration) {
+        print('📦 Using cached enrolled students for subject $subjectId');
+        return _enrolledStudentsCache[subjectId]!;
+      }
+    }
+
     try {
       final res = await http
           .get(
@@ -287,9 +323,17 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = data['students'] as List? ?? [];
+        List<Student> students = [];
         if (list.isNotEmpty) {
-          return list.map<Student>((j) => Student.fromJson(j)).toList();
+          students = list.map<Student>((j) => Student.fromJson(j)).toList();
         }
+
+        // Store in cache
+        _enrolledStudentsCache[subjectId] = students;
+        _cacheTimestamp[subjectId] = DateTime.now();
+        print(
+            '✅ Cached ${students.length} enrolled students for subject $subjectId');
+        return students;
       }
     } catch (e) {
       debugPrint('Error fetching enrolled students: $e');
@@ -384,7 +428,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         camOk = jsonDecode(cr.body)['success'] == true;
       } catch (_) {}
 
-      // Get enrolled students
+      // Get enrolled students (from cache or API)
       final students = await _getEnrolledStudents(lecture.subjectId, token);
 
       setState(() {
@@ -872,43 +916,48 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          // Tab bar
-          Container(
-            margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: _isDark
-                  ? Colors.white.withValues(alpha: 0.05)
-                  : Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(40),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        color: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).cardColor,
+        child: Column(
+          children: [
+            // Tab bar
+            Container(
+              margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: _isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(40),
+              ),
+              child: Row(
+                children: [
+                  _buildTab('Lectures', Icons.calendar_today_rounded,
+                      !_showActiveSessions, () {
+                    setState(() => _showActiveSessions = false);
+                  }),
+                  _buildTab(
+                    _phase == SessionPhase.confirming ? 'QR Mode' : 'Live',
+                    _phase == SessionPhase.confirming
+                        ? Icons.qr_code
+                        : Icons.qr_code_scanner_rounded,
+                    _showActiveSessions,
+                    () {
+                      setState(() => _showActiveSessions = true);
+                    },
+                  ),
+                ],
+              ),
             ),
-            child: Row(
-              children: [
-                _buildTab('Lectures', Icons.calendar_today_rounded,
-                    !_showActiveSessions, () {
-                  setState(() => _showActiveSessions = false);
-                }),
-                _buildTab(
-                  _phase == SessionPhase.confirming ? 'QR Mode' : 'Live',
-                  _phase == SessionPhase.confirming
-                      ? Icons.qr_code
-                      : Icons.qr_code_scanner_rounded,
-                  _showActiveSessions,
-                  () {
-                    setState(() => _showActiveSessions = true);
-                  },
-                ),
-              ],
+            Expanded(
+              child: _showActiveSessions
+                  ? _buildActiveSessionsContent()
+                  : _buildLecturesContent(lecturesByDay, daysToShow),
             ),
-          ),
-          Expanded(
-            child: _showActiveSessions
-                ? _buildActiveSessionsContent()
-                : _buildLecturesContent(lecturesByDay, daysToShow),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

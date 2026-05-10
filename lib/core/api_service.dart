@@ -335,16 +335,42 @@ class ApiService {
     }
   }
 
+  static Future<String> getCurrentAcademicYear() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/academic/settings'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['current_academic_year'] ?? '2026-2027';
+      }
+      return '2026-2027';
+    } catch (e) {
+      print('❌ Error getting academic year: $e');
+      return '2026-2027';
+    }
+  }
+
+  // ✅ FIXED: attendance with proper token handling
   static Future<List<dynamic>> getAttendance([String? token]) async {
-    final headers = Map<String, String>.from(_headers);
-    if (token != null) {
-      headers['Authorization'] = 'Bearer $token';
+    final effectiveToken = token ?? _token;
+
+    final headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (effectiveToken != null && effectiveToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $effectiveToken';
+      print('🔐 Token attached to attendance request');
+    } else {
+      print('⚠️ No token available for attendance request');
     }
 
     final res = await http.get(
       Uri.parse('${AppConstants.baseUrl}${AppConstants.attendanceEndpoint}'),
       headers: headers,
     );
+    print('📡 Attendance response: ${res.statusCode}');
     return res.statusCode == 200 ? jsonDecode(res.body) : [];
   }
 

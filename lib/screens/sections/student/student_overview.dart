@@ -16,6 +16,7 @@ class StudentOverview extends StatefulWidget {
 
 class _StudentOverviewState extends State<StudentOverview> {
   int? _currentSemester;
+  bool _isRefreshing = false;
 
   @override
   void initState() {
@@ -27,6 +28,31 @@ class _StudentOverviewState extends State<StudentOverview> {
     final sem = await ApiService.getCurrentSemester();
     if (mounted) {
       setState(() => _currentSemester = sem);
+    }
+  }
+
+  Future<void> _refreshData() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      await context.read<DataCubit>().loadAllData();
+      // ignore: use_build_context_synchronously
+      final authState = context.read<AuthCubit>().state;
+      if (authState.user != null && authState.token != null) {
+        // ignore: use_build_context_synchronously
+        await context.read<DataCubit>().loadStudentGradesWithToken(
+              authState.user!.id,
+              authState.token!,
+            );
+      }
+      await _loadCurrentSemester();
+    } catch (e) {
+      print('Error refreshing: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
     }
   }
 
@@ -80,144 +106,103 @@ class _StudentOverviewState extends State<StudentOverview> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 140,
-            floating: true,
-            pinned: true,
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            flexibleSpace: FlexibleSpaceBar(
-              title: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color:
-                          Theme.of(context).primaryColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(10),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        color: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).cardColor,
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              expandedHeight: 140,
+              floating: true,
+              pinned: true,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              flexibleSpace: FlexibleSpaceBar(
+                title: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .primaryColor
+                            .withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.school,
+                          color: Theme.of(context).primaryColor, size: 20),
                     ),
-                    child: Icon(Icons.school,
-                        color: Theme.of(context).primaryColor, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          student.name,
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          'Level $currentLevel • ${student.department} • $semesterDisplay',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(fontSize: 10),
-                        ),
-                      ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            student.name,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            'Level $currentLevel • ${student.department} • $semesterDisplay',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontSize: 10),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              centerTitle: false,
-              titlePadding:
-                  const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.0,
-              ),
-              delegate: SliverChildListDelegate([
-                _buildBentoCard(
-                    'Total Subjects',
-                    '${studentSubjects.length}',
-                    Icons.book,
-                    [const Color(0xFF8B5CF6), const Color(0xFF6366F1)]),
-                _buildBentoCard(
-                    'Total Lectures',
-                    '${studentLectures.length}',
-                    Icons.school,
-                    [const Color(0xFF0EA5E9), const Color(0xFF0284C7)]),
-                _buildBentoCard(
-                    'Semester GPA',
-                    semesterGPA.toStringAsFixed(2),
-                    Icons.trending_up,
-                    [const Color(0xFF10B981), const Color(0xFF059669)],
-                    subtitle: semesterDisplay),
-                _buildBentoCard(
-                    'Cumulative GPA',
-                    cumulativeGPA.toStringAsFixed(2),
-                    Icons.grade,
-                    [const Color(0xFFF59E0B), const Color(0xFFD97706)],
-                    subtitle: 'Overall'),
-              ]),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Theme.of(context).dividerColor),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today,
-                            color: Theme.of(context).primaryColor, size: 18),
-                        const SizedBox(width: 8),
-                        Text("Today's Schedule ($todayName)",
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 15)),
-                        const Spacer(),
-                        Text('${todaysLectures.length}',
-                            style: TextStyle(
-                                color: Theme.of(context).primaryColor,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                  if (todaysLectures.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(20),
-                      child: Center(
-                          child: Text('No lectures today',
-                              style: TextStyle(color: Color(0xFF94A3B8)))),
-                    )
-                  else
-                    ...todaysLectures.map((l) => Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 4),
-                          child: _buildLectureItem(l, context),
-                        )),
-                  const SizedBox(height: 12),
-                ],
+                  ],
+                ),
+                centerTitle: false,
+                titlePadding:
+                    const EdgeInsets.only(left: 16, right: 16, bottom: 12),
               ),
             ),
-          ),
-          if (recentGrades.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.0,
+                ),
+                delegate: SliverChildListDelegate([
+                  _buildBentoCard(
+                      'Total Subjects',
+                      '${studentSubjects.length}',
+                      Icons.book,
+                      [const Color(0xFF8B5CF6), const Color(0xFF6366F1)]),
+                  _buildBentoCard(
+                      'Total Lectures',
+                      '${studentLectures.length}',
+                      Icons.school,
+                      [const Color(0xFF0EA5E9), const Color(0xFF0284C7)]),
+                  _buildBentoCard(
+                      'Semester GPA',
+                      semesterGPA.toStringAsFixed(2),
+                      Icons.trending_up,
+                      [const Color(0xFF10B981), const Color(0xFF059669)],
+                      subtitle: semesterDisplay),
+                  _buildBentoCard(
+                      'Cumulative GPA',
+                      cumulativeGPA.toStringAsFixed(2),
+                      Icons.grade,
+                      [const Color(0xFFF59E0B), const Color(0xFFD97706)],
+                      subtitle: 'Overall'),
+                ]),
+              ),
+            ),
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.all(16),
+                margin: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(20),
@@ -226,24 +211,73 @@ class _StudentOverviewState extends State<StudentOverview> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(14),
-                      child: Text('Recent Grades',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.calendar_today,
+                              color: Theme.of(context).primaryColor, size: 18),
+                          const SizedBox(width: 8),
+                          Text("Today's Schedule ($todayName)",
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
+                          const Spacer(),
+                          Text('${todaysLectures.length}',
+                              style: TextStyle(
+                                  color: Theme.of(context).primaryColor,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
                     ),
-                    ...recentGrades.take(5).map((g) => Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 4),
-                          child: _buildGradeItem(g),
-                        )),
+                    if (todaysLectures.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Center(
+                            child: Text('No lectures today',
+                                style: TextStyle(color: Color(0xFF94A3B8)))),
+                      )
+                    else
+                      ...todaysLectures.map((l) => Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 4),
+                            child: _buildLectureItem(l, context),
+                          )),
                     const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
-          const SliverToBoxAdapter(child: SizedBox(height: 20)),
-        ],
+            if (recentGrades.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.all(14),
+                        child: Text('Recent Grades',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
+                      ...recentGrades.take(5).map((g) => Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 4),
+                            child: _buildGradeItem(g),
+                          )),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+                ),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+          ],
+        ),
       ),
     );
   }

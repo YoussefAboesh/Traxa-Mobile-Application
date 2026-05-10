@@ -16,8 +16,24 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
   String _searchQuery = '';
   int _selectedLevel = 0; // 0 = All Levels
   bool _showFilters = true;
+  bool _isRefreshing = false;
 
   final List<int> _levels = [1, 2, 3, 4];
+
+  Future<void> _refreshSubjects() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      await context.read<DataCubit>().loadAllData();
+    } catch (e) {
+      print('Error refreshing subjects: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,330 +78,337 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
-        slivers: [
-          // Header with semester info
-          SliverAppBar(
-            title: const Text('My Subjects'),
-            centerTitle: false,
-            floating: true,
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            actions: [
-              Container(
-                margin: const EdgeInsets.only(right: 16),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'S$currentSemester',
-                  style: TextStyle(
-                    color: Theme.of(context).primaryColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+      body: RefreshIndicator(
+        onRefresh: _refreshSubjects,
+        color: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).cardColor,
+        child: CustomScrollView(
+          slivers: [
+            // Header with semester info
+            SliverAppBar(
+              title: const Text('My Subjects'),
+              centerTitle: false,
+              floating: true,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              actions: [
+                Container(
+                  margin: const EdgeInsets.only(right: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color:
+                        Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ),
-              ),
-            ],
-          ),
-
-          // Search and Filters
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.1)
-                      : Colors.grey.shade200,
-                ),
-              ),
-              child: Column(
-                children: [
-                  // Search Field
-                  TextField(
+                  child: Text(
+                    'S$currentSemester',
                     style: TextStyle(
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
-                      fontSize: 13,
+                      color: Theme.of(context).primaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
                     ),
-                    decoration: InputDecoration(
-                      hintText: 'Search subjects...',
-                      hintStyle: TextStyle(
-                        color: isDark
-                            ? const Color(0xFF64748B)
-                            : Colors.grey.shade500,
-                        fontSize: 12,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : Colors.grey.shade600,
-                        size: 18,
-                      ),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(
-                                Icons.close,
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : Colors.grey.shade600,
-                                size: 18,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _searchQuery = ''),
-                            )
-                          : null,
-                      filled: true,
-                      fillColor: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.grey.shade100,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                    ),
-                    onChanged: (value) => setState(() => _searchQuery = value),
                   ),
+                ),
+              ],
+            ),
 
-                  const SizedBox(height: 12),
+            // Search and Filters
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.grey.shade200,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    // Search Field
+                    TextField(
+                      style: TextStyle(
+                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        fontSize: 13,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search subjects...',
+                        hintStyle: TextStyle(
+                          color: isDark
+                              ? const Color(0xFF64748B)
+                              : Colors.grey.shade500,
+                          fontSize: 12,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: isDark
+                              ? const Color(0xFF94A3B8)
+                              : Colors.grey.shade600,
+                          size: 18,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(
+                                  Icons.close,
+                                  color: isDark
+                                      ? const Color(0xFF94A3B8)
+                                      : Colors.grey.shade600,
+                                  size: 18,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _searchQuery = ''),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.grey.shade100,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _searchQuery = value),
+                    ),
 
-                  // Filter Row
-                  Row(
-                    children: [
-                      // Filter button
-                      GestureDetector(
-                        onTap: () =>
-                            setState(() => _showFilters = !_showFilters),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _showFilters
-                                ? Theme.of(context)
-                                    .primaryColor
-                                    .withValues(alpha: 0.2)
-                                : (isDark
-                                    ? Colors.white.withValues(alpha: 0.05)
-                                    : Colors.grey.shade100),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
+                    const SizedBox(height: 12),
+
+                    // Filter Row
+                    Row(
+                      children: [
+                        // Filter button
+                        GestureDetector(
+                          onTap: () =>
+                              setState(() => _showFilters = !_showFilters),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
                               color: _showFilters
                                   ? Theme.of(context)
                                       .primaryColor
-                                      .withValues(alpha: 0.5)
+                                      .withValues(alpha: 0.2)
                                   : (isDark
-                                      ? Colors.white.withValues(alpha: 0.1)
-                                      : Colors.grey.shade200),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _showFilters
-                                    ? Icons.filter_alt
-                                    : Icons.filter_alt_outlined,
-                                size: 16,
+                                      ? Colors.white.withValues(alpha: 0.05)
+                                      : Colors.grey.shade100),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
                                 color: _showFilters
-                                    ? Theme.of(context).primaryColor
+                                    ? Theme.of(context)
+                                        .primaryColor
+                                        .withValues(alpha: 0.5)
                                     : (isDark
-                                        ? const Color(0xFF94A3B8)
-                                        : Colors.grey.shade600),
+                                        ? Colors.white.withValues(alpha: 0.1)
+                                        : Colors.grey.shade200),
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Filter',
-                                style: TextStyle(
-                                  fontSize: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _showFilters
+                                      ? Icons.filter_alt
+                                      : Icons.filter_alt_outlined,
+                                  size: 16,
                                   color: _showFilters
                                       ? Theme.of(context).primaryColor
                                       : (isDark
                                           ? const Color(0xFF94A3B8)
                                           : Colors.grey.shade600),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(width: 12),
-
-                      // Level Dropdown
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.1)
-                                  : Colors.grey.shade200,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: _selectedLevel,
-                              isExpanded: true,
-                              dropdownColor: Theme.of(context).cardColor,
-                              style: TextStyle(
-                                color: isDark
-                                    ? Colors.white
-                                    : const Color(0xFF1E293B),
-                                fontSize: 12,
-                              ),
-                              icon: Icon(
-                                Icons.arrow_drop_down,
-                                color: isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : Colors.grey.shade600,
-                              ),
-                              items: [
-                                const DropdownMenuItem(
-                                    value: 0, child: Text('All Levels')),
-                                ..._levels.map((level) => DropdownMenuItem(
-                                      value: level,
-                                      child: Text('Level $level'),
-                                    )),
-                              ],
-                              onChanged: (value) =>
-                                  setState(() => _selectedLevel = value ?? 0),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Subjects List by Level
-          if (subjectsByLevel.isNotEmpty)
-            SliverList(
-              delegate: SliverChildListDelegate(
-                subjectsByLevel.keys.map((level) {
-                  final levelSubjects = subjectsByLevel[level]!;
-
-                  // All subjects are in current semester (no need to split by semester)
-                  levelSubjects.sort((a, b) => a.name.compareTo(b.name));
-
-                  return Container(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Level Header
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 10, horizontal: 16),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
-                            ),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Level $level',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  '${levelSubjects.length} subjects',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.white70,
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Filter',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _showFilters
+                                        ? Theme.of(context).primaryColor
+                                        : (isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : Colors.grey.shade600),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 12),
 
-                        // Subjects table (no semester split because all are current semester)
-                        _buildSubjectsTable(levelSubjects),
+                        const SizedBox(width: 12),
 
-                        const SizedBox(height: 8),
+                        // Level Dropdown
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.1)
+                                    : Colors.grey.shade200,
+                              ),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                value: _selectedLevel,
+                                isExpanded: true,
+                                dropdownColor: Theme.of(context).cardColor,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF1E293B),
+                                  fontSize: 12,
+                                ),
+                                icon: Icon(
+                                  Icons.arrow_drop_down,
+                                  color: isDark
+                                      ? const Color(0xFF94A3B8)
+                                      : Colors.grey.shade600,
+                                ),
+                                items: [
+                                  const DropdownMenuItem(
+                                      value: 0, child: Text('All Levels')),
+                                  ..._levels.map((level) => DropdownMenuItem(
+                                        value: level,
+                                        child: Text('Level $level'),
+                                      )),
+                                ],
+                                onChanged: (value) =>
+                                    setState(() => _selectedLevel = value ?? 0),
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                  );
-                }).toList(),
+                  ],
+                ),
               ),
             ),
 
-          // Empty state
-          if (subjectsByLevel.isEmpty)
-            SliverToBoxAdapter(
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(40),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(20),
+            // Subjects List by Level
+            if (subjectsByLevel.isNotEmpty)
+              SliverList(
+                delegate: SliverChildListDelegate(
+                  subjectsByLevel.keys.map((level) {
+                    final levelSubjects = subjectsByLevel[level]!;
+
+                    // All subjects are in current semester (no need to split by semester)
+                    levelSubjects.sort((a, b) => a.name.compareTo(b.name));
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Level Header
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 10, horizontal: 16),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Level $level',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '${levelSubjects.length} subjects',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Subjects table (no semester split because all are current semester)
+                          _buildSubjectsTable(levelSubjects),
+
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    );
+                  }).toList(),
                 ),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Icon(Icons.book,
-                          size: 48,
-                          color: isDark
-                              ? const Color(0xFF64748B)
-                              : Colors.grey.shade400),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No subjects for Semester $currentSemester',
-                        style: TextStyle(
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : Colors.grey.shade600,
-                          fontSize: 16,
+              ),
+
+            // Empty state
+            if (subjectsByLevel.isEmpty)
+              SliverToBoxAdapter(
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(40),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.book,
+                            size: 48,
+                            color: isDark
+                                ? const Color(0xFF64748B)
+                                : Colors.grey.shade400),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No subjects for Semester $currentSemester',
+                          style: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : Colors.grey.shade600,
+                            fontSize: 16,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Subjects will appear when assigned in the current semester',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark
-                              ? const Color(0xFF64748B)
-                              : Colors.grey.shade500,
+                        const SizedBox(height: 8),
+                        Text(
+                          'Subjects will appear when assigned in the current semester',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF64748B)
+                                : Colors.grey.shade500,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-          const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
-        ],
+            const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
+          ],
+        ),
       ),
     );
   }
