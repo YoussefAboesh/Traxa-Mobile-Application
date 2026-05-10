@@ -10,7 +10,9 @@ import '../../models/attendance.dart';
 import 'data_state.dart';
 
 class DataCubit extends Cubit<DataState> {
-  DataCubit() : super(DataState.initial());
+  DataCubit() : super(DataState.initial()) {
+    loadSystemData();
+  }
 
   int _currentSemester = 1;
   String _currentAcademicYear = '2026-2027';
@@ -18,10 +20,27 @@ class DataCubit extends Cubit<DataState> {
   int get currentSemester => _currentSemester;
   String get currentAcademicYear => _currentAcademicYear;
 
+  Future<void> loadSystemData() async {
+    try {
+      await loadCurrentSemester();
+      await loadCurrentAcademicYear();
+      if (_currentSemester != state.currentSemester ||
+          _currentAcademicYear != state.currentAcademicYear) {
+        emit(state.copyWith(
+          currentSemester: _currentSemester,
+          currentAcademicYear: _currentAcademicYear,
+        ));
+      }
+      print('✅ System data: S$_currentSemester / $_currentAcademicYear');
+    } catch (e) {
+      print('❌ Error loading system data: $e');
+    }
+  }
+
   Future<void> loadCurrentSemester() async {
     try {
       _currentSemester = await ApiService.getCurrentSemester();
-      print('📅 Current semester loaded: $_currentSemester');
+      print('📅 Semester: $_currentSemester');
     } catch (e) {
       print('❌ Error loading semester: $e');
       _currentSemester = 1;
@@ -31,7 +50,7 @@ class DataCubit extends Cubit<DataState> {
   Future<void> loadCurrentAcademicYear() async {
     try {
       _currentAcademicYear = await ApiService.getCurrentAcademicYear();
-      print('📅 Current academic year loaded: $_currentAcademicYear');
+      print('📅 Academic year: $_currentAcademicYear');
     } catch (e) {
       print('❌ Error loading academic year: $e');
       _currentAcademicYear = '2026-2027';

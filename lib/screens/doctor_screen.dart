@@ -1,9 +1,10 @@
 // lib/screens/doctor_screen.dart
+// ignore_for_file: duplicate_ignore, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
-import '../cubit/data/data_state.dart';
 import '../cubit/theme/theme_cubit.dart';
 import '../services/websocket_service.dart';
 import '../widgets/settings_bottom_sheet.dart';
@@ -22,6 +23,13 @@ class DoctorScreen extends StatefulWidget {
 class _DoctorScreenState extends State<DoctorScreen> {
   int _selectedIndex = 0;
   bool _isReloading = false;
+  
+  // Local variables for immediate UI update
+  String _localAcademicYear = '2026-2027';
+  int _localSemester = 1;
+  
+  // Store the new year from WebSocket
+  String _pendingAcademicYear = '';
 
   final List<Widget> _sections = [
     const DoctorOverview(),
@@ -53,11 +61,32 @@ class _DoctorScreenState extends State<DoctorScreen> {
   void initState() {
     super.initState();
     _setupWebSocketListeners();
+    _loadFreshDataOnStart();
   }
 
   @override
   void dispose() {
     super.dispose();
+  }
+
+  Future<void> _loadFreshDataOnStart() async {
+    try {
+      print('🔄 Loading fresh data on app start...');
+      // ignore: use_build_context_synchronously
+      await context.read<DataCubit>().fullReload();
+
+      // ignore: use_build_context_synchronously
+      final updatedState = context.read<DataCubit>().state;
+      if (mounted) {
+        setState(() {
+          _localAcademicYear = updatedState.currentAcademicYear;
+          _localSemester = updatedState.currentSemester;
+        });
+      }
+      print('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
+    } catch (e) {
+      print('❌ Error loading fresh data: $e');
+    }
   }
 
   Future<void> _fullReload() async {
@@ -67,18 +96,24 @@ class _DoctorScreenState extends State<DoctorScreen> {
     try {
       print('🔄 DoctorScreen: Full reload started...');
       
+      final savedYear = _localAcademicYear;
+      
       await context.read<AuthCubit>().refreshUserData();
-      // ignore: use_build_context_synchronously
       await context.read<DataCubit>().fullReload();
       
-      print('✅ DoctorScreen: Full reload completed');
-      // ignore: use_build_context_synchronously
-      print('📅 Current Semester: ${context.read<DataCubit>().currentSemester}');
-      // ignore: use_build_context_synchronously
-      print('📅 Current Academic Year: ${context.read<DataCubit>().currentAcademicYear}');
+      final dataState = context.read<DataCubit>().state;
+      setState(() {
+        if (_pendingAcademicYear.isNotEmpty) {
+          _localAcademicYear = _pendingAcademicYear;
+        } else {
+          _localAcademicYear = savedYear;
+        }
+        _localSemester = dataState.currentSemester;
+      });
+      
+      print('✅ DoctorScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
       
       if (mounted) {
-        setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Row(
@@ -124,36 +159,36 @@ class _DoctorScreenState extends State<DoctorScreen> {
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
+    // ✅ Semester changed - Auto reload
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
-      print('📢 Semester changed to: S$semester');
+      print('📢 WebSocket - Semester changed to: S$semester');
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Semester changed to S$semester - Updating...'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      setState(() {
+        _localSemester = semester;
+      });
       
       await _fullReload();
     });
 
+    // ✅ Academic year changed - Auto reload
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
-      print('📢 Academic year changed to: $year');
+      print('📢 WebSocket - Academic year changed to: $year');
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Academic year changed to $year - Updating...'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      setState(() {
+        _pendingAcademicYear = year;
+        _localAcademicYear = year;
+      });
       
       await _fullReload();
+      
+      setState(() {
+        _pendingAcademicYear = '';
+      });
     });
 
+    // ✅ Session activated
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
       final session = data['session'] as Map<String, dynamic>?;
@@ -163,6 +198,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
           content: Text('Session activated: $subjectName'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       if (_selectedIndex == 2) {
@@ -170,6 +207,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
+    // ✅ Session ended
     ws.sessionEndedStream.listen((data) {
       if (!mounted) return;
       final sessionId = data['sessionId'] as String? ?? 'Unknown';
@@ -178,6 +216,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
           content: Text('Session ended: $sessionId'),
           backgroundColor: Colors.orange,
           duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       if (_selectedIndex == 2) {
@@ -185,6 +225,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
+    // ✅ Grade updated
     ws.gradeUpdateStream.listen((gradeData) {
       if (!mounted) return;
       final studentId = gradeData['student_id'] as int?;
@@ -195,6 +236,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
           content: Text('Grade updated for student #$studentId: $total%'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
 
@@ -203,19 +246,23 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
+    // ✅ Levels promoted
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
       print('📢 Levels promoted - Auto reloading...');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Levels promoted - Reloading data...'),
+        SnackBar(
+          content: const Text('Levels promoted - Reloading data...'),
           backgroundColor: Colors.blue,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       await _fullReload();
     });
 
+    // ✅ General data change
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
@@ -262,200 +309,190 @@ class _DoctorScreenState extends State<DoctorScreen> {
       );
     }
 
-    return BlocBuilder<DataCubit, DataState>(
-      builder: (context, dataState) {
-        final currentSemester = dataState.currentSemester;
-        final currentAcademicYear = dataState.currentAcademicYear;
-
-        return Scaffold(
-          appBar: AppBar(
-            titleSpacing: 0,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ✅ أيقونة الدكتور
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.medical_services_rounded, color: Colors.white, size: 18),
-                  ),
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
                 ),
-                const SizedBox(width: 8),
-                // ✅ Semester Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0EA5E9).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timeline, size: 12, color: Color(0xFF0EA5E9)),
-                      const SizedBox(width: 4),
-                      Text(
-                        'S$currentSemester',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF0EA5E9),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // ✅ Academic Year Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
-                      const SizedBox(width: 4),
-                      Text(
-                        currentAcademicYear,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.purple,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(
+                child: Icon(Icons.medical_services_rounded, color: Colors.white, size: 18),
+              ),
             ),
-            centerTitle: false,
-            backgroundColor: Colors.transparent,
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0EA5E9).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timeline, size: 12, color: Color(0xFF0EA5E9)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'S$_localSemester',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF0EA5E9),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
+                  const SizedBox(width: 4),
+                  Text(
+                    _localAcademicYear,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.purple,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        centerTitle: false,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
+            onPressed: () {
+              Scaffold.of(context).openDrawer();
+            },
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.notifications_none_rounded,
+                color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('No new notifications'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _isReloading
+                  ? const SizedBox(
+                      key: ValueKey('loading'),
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF0EA5E9),
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh_rounded,
+                      key: const ValueKey('refresh'),
+                      color: Theme.of(context).primaryColor,
+                      size: 22,
+                    ),
+            ),
+            onPressed: _isReloading ? null : _fullReload,
+          ),
+          _buildAnimatedThemeToggle(isDarkMode),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: StreamBuilder<bool>(
+              stream: Stream.periodic(const Duration(seconds: 1),
+                  (_) => WebSocketService.instance.isConnected),
+              initialData: WebSocketService.instance.isConnected,
+              builder: (context, snapshot) {
+                final isConnected = snapshot.data ?? false;
+                return Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isConnected ? Colors.green : Colors.red,
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isConnected ? Colors.green : Colors.red)
+                            .withValues(alpha: 0.5),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+      drawer: _buildDrawer(context, doctor, doctorEmail),
+      body: _sections[_selectedIndex],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 20,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            currentIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+            },
+            backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            selectedItemColor: const Color(0xFF0EA5E9),
+            unselectedItemColor:
+                isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            selectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 12,
+            ),
             elevation: 0,
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
-                onPressed: () {
-                  Scaffold.of(context).openDrawer();
-                },
-              ),
-            ),
-            actions: [
-              IconButton(
-                icon: Icon(Icons.notifications_none_rounded,
-                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No new notifications'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-              ),
-              IconButton(
-                icon: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: _isReloading
-                      ? const SizedBox(
-                          key: ValueKey('loading'),
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFF0EA5E9),
-                          ),
-                        )
-                      : Icon(
-                          Icons.refresh_rounded,
-                          key: const ValueKey('refresh'),
-                          color: Theme.of(context).primaryColor,
-                          size: 22,
-                        ),
-                ),
-                onPressed: _isReloading ? null : _fullReload,
-              ),
-              _buildAnimatedThemeToggle(isDarkMode),
-              Container(
-                margin: const EdgeInsets.only(right: 8),
-                child: StreamBuilder<bool>(
-                  stream: Stream.periodic(const Duration(seconds: 1),
-                      (_) => WebSocketService.instance.isConnected),
-                  initialData: WebSocketService.instance.isConnected,
-                  builder: (context, snapshot) {
-                    final isConnected = snapshot.data ?? false;
-                    return Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isConnected ? Colors.green : Colors.red,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isConnected ? Colors.green : Colors.red)
-                                .withValues(alpha: 0.5),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            items: _navItems,
           ),
-          drawer: _buildDrawer(context, doctor, doctorEmail),
-          body: _sections[_selectedIndex],
-          bottomNavigationBar: Container(
-            decoration: BoxDecoration(
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 20,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(24),
-                topRight: Radius.circular(24),
-              ),
-              child: BottomNavigationBar(
-                type: BottomNavigationBarType.fixed,
-                currentIndex: _selectedIndex,
-                onTap: (index) {
-                  setState(() {
-                    _selectedIndex = index;
-                  });
-                },
-                backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                selectedItemColor: const Color(0xFF0EA5E9),
-                unselectedItemColor:
-                    isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-                selectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 12,
-                ),
-                elevation: 0,
-                items: _navItems,
-              ),
-            ),
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 

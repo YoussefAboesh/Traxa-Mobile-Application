@@ -3,7 +3,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:traxa_mobile/cubit/data/data_state.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../cubit/theme/theme_cubit.dart';
@@ -24,6 +23,13 @@ class StudentScreen extends StatefulWidget {
 class _StudentScreenState extends State<StudentScreen> {
   int _selectedIndex = 0;
   bool _isReloading = false;
+  
+  // Local variables for immediate UI update
+  String _localAcademicYear = '2026-2027';
+  int _localSemester = 1;
+  
+  // Store the new year from WebSocket
+  String _pendingAcademicYear = '';
 
   final List<Widget> _sections = [
     const StudentOverview(),
@@ -55,11 +61,38 @@ class _StudentScreenState extends State<StudentScreen> {
   void initState() {
     super.initState();
     _setupWebSocketListeners();
+    _loadFreshDataOnStart();
   }
 
   @override
   void dispose() {
     super.dispose();
+  }
+
+  Future<void> _loadFreshDataOnStart() async {
+    try {
+      print('🔄 Loading fresh data on app start...');
+      await context.read<DataCubit>().fullReload();
+
+      final authState = context.read<AuthCubit>().state;
+      if (authState.user != null && authState.token != null) {
+        await context.read<DataCubit>().loadStudentGradesWithToken(
+              authState.user!.id,
+              authState.token!,
+            );
+      }
+
+      final updatedState = context.read<DataCubit>().state;
+      if (mounted) {
+        setState(() {
+          _localAcademicYear = updatedState.currentAcademicYear;
+          _localSemester = updatedState.currentSemester;
+        });
+      }
+      print('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
+    } catch (e) {
+      print('❌ Error loading fresh data: $e');
+    }
   }
 
   Future<void> _fullReload() async {
@@ -68,6 +101,8 @@ class _StudentScreenState extends State<StudentScreen> {
     
     try {
       print('🔄 StudentScreen: Full reload started...');
+      
+      final savedYear = _localAcademicYear;
       
       await context.read<AuthCubit>().refreshUserData();
       await context.read<DataCubit>().fullReload();
@@ -80,14 +115,19 @@ class _StudentScreenState extends State<StudentScreen> {
             );
       }
       
-      print('✅ StudentScreen: Full reload completed');
-      print('📅 Current Semester from DataCubit: ${context.read<DataCubit>().currentSemester}');
-      print('📅 Current Academic Year from DataCubit: ${context.read<DataCubit>().currentAcademicYear}');
+      final dataState = context.read<DataCubit>().state;
+      setState(() {
+        if (_pendingAcademicYear.isNotEmpty) {
+          _localAcademicYear = _pendingAcademicYear;
+        } else {
+          _localAcademicYear = savedYear;
+        }
+        _localSemester = dataState.currentSemester;
+      });
+      
+      print('✅ StudentScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
       
       if (mounted) {
-        // ✅ إعادة بناء الـ UI بعد الـ reload
-        setState(() {});
-        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Row(
@@ -133,58 +173,66 @@ class _StudentScreenState extends State<StudentScreen> {
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
+    // ✅ Semester changed - Auto reload
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
-      print('📢 Semester changed to: S$semester');
+      print('📢 WebSocket - Semester changed to: S$semester');
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Semester changed to S$semester - Updating...'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      setState(() {
+        _localSemester = semester;
+      });
       
       await _fullReload();
     });
 
+    // ✅ Academic year changed - Auto reload
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
-      print('📢 Academic year changed to: $year');
+      print('📢 WebSocket - Academic year changed to: $year');
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Academic year changed to $year - Updating...'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      setState(() {
+        _pendingAcademicYear = year;
+        _localAcademicYear = year;
+      });
       
       await _fullReload();
+      
+      setState(() {
+        _pendingAcademicYear = '';
+      });
     });
 
+    // ✅ Grade updated or hidden
     ws.gradeUpdateStream.listen((gradeData) {
       if (!mounted) return;
       final authState = context.read<AuthCubit>().state;
-      final studentId = gradeData['student_id'] as int?;
+      if (authState.user == null || authState.token == null) return;
 
-      if (authState.user != null && studentId == authState.user!.id) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Your grade has been updated!'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        if (authState.token != null) {
-          context.read<DataCubit>().loadStudentGradesWithToken(
-                authState.user!.id,
-                authState.token!,
-              );
+      final rawId = gradeData['student_id'] ?? gradeData['studentId'];
+      final studentId = int.tryParse(rawId?.toString() ?? '');
+
+      // reload if it's this student's grade, or if we can't identify the student
+      if (studentId == null || studentId == authState.user!.id) {
+        final isVisible = gradeData['isVisible'] ?? gradeData['is_visible'];
+        if (isVisible != false && studentId == authState.user!.id) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Your grade has been updated!'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
         }
+        context.read<DataCubit>().loadStudentGradesWithToken(
+              authState.user!.id,
+              authState.token!,
+            );
       }
     });
 
+    // ✅ Registration approved
     ws.registrationApprovedStream.listen((subjects) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -192,24 +240,30 @@ class _StudentScreenState extends State<StudentScreen> {
           content: Text('Registration approved! (${subjects.length} subjects)'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       context.read<DataCubit>().loadAllData();
     });
 
+    // ✅ Levels promoted
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
       print('📢 Levels promoted - Auto reloading...');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Levels promoted - Reloading data...'),
+        SnackBar(
+          content: const Text('Levels promoted - Reloading data...'),
           backgroundColor: Colors.blue,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       await _fullReload();
     });
 
+    // ✅ General data change
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
@@ -218,12 +272,14 @@ class _StudentScreenState extends State<StudentScreen> {
         final action = data['action'] as String?;
         print('📱 StudentScreen: Data change - $entity / $action');
 
-        if (entity == 'grade' && (action == 'created' || action == 'updated')) {
-          final gradeData = data['data'] as Map<String, dynamic>?;
-          if (gradeData != null) {
-            final studentId = gradeData['student_id'] as int?;
-            final authState = context.read<AuthCubit>().state;
-            if (authState.user != null && studentId == authState.user!.id) {
+        if (entity == 'grade') {
+          final authState = context.read<AuthCubit>().state;
+          if (authState.user != null && authState.token != null) {
+            final gradeData = data['data'] as Map<String, dynamic>?;
+            // check student_id flexibly (int or string from server)
+            final rawId = gradeData?['student_id'] ?? gradeData?['studentId'];
+            final studentId = int.tryParse(rawId?.toString() ?? '');
+            if (studentId == null || studentId == authState.user!.id) {
               context.read<DataCubit>().loadStudentGradesWithToken(
                     authState.user!.id,
                     authState.token!,
@@ -248,208 +304,199 @@ class _StudentScreenState extends State<StudentScreen> {
     final themeCubit = context.watch<ThemeCubit>();
     final student = authState.user;
     final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
-    
-    // ✅ استخدام BlocBuilder بدلاً من watch للتأكد من إعادة البناء
-    return BlocBuilder<DataCubit, DataState>(
-      builder: (context, dataState) {
-        final currentSemester = dataState.currentSemester;
-        final currentAcademicYear = dataState.currentAcademicYear;
 
-        if (student == null) {
-          return const Scaffold(
-            body: Center(child: Text('User not found')),
-          );
-        }
+    if (student == null) {
+      return const Scaffold(
+        body: Center(child: Text('User not found')),
+      );
+    }
 
-        return Scaffold(
-          appBar: AppBar(
-            titleSpacing: 0,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ✅ أيقونة
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.school_rounded, color: Colors.white, size: 18),
-                  ),
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
                 ),
-                const SizedBox(width: 8),
-                // ✅ Semester Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timeline, size: 12, color: Color(0xFF8B5CF6)),
-                      const SizedBox(width: 4),
-                      Text(
-                        'S$currentSemester',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF8B5CF6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // ✅ Academic Year Badge - يتم تحديثه تلقائياً لأن الـ BlocBuilder يعيد البناء
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
-                      const SizedBox(width: 4),
-                      Text(
-                        currentAcademicYear,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.purple,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(
+                child: Icon(Icons.school_rounded, color: Colors.white, size: 18),
+              ),
             ),
-            centerTitle: false,
-            backgroundColor: Colors.transparent,
+            const SizedBox(width: 8),
+            // Semester Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timeline, size: 12, color: Color(0xFF8B5CF6)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'S$_localSemester',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF8B5CF6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Academic Year Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
+                  const SizedBox(width: 4),
+                  Text(
+                    _localAcademicYear,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.purple,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        centerTitle: false,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
+            onPressed: () {
+              Scaffold.of(context).openDrawer();
+            },
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.notifications_none_rounded,
+                color: Theme.of(context).hintColor),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('No new notifications'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _isReloading
+                  ? const SizedBox(
+                      key: ValueKey('loading'),
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh_rounded,
+                      key: const ValueKey('refresh'),
+                      color: Theme.of(context).primaryColor,
+                      size: 22,
+                    ),
+            ),
+            onPressed: _isReloading ? null : _fullReload,
+          ),
+          _buildAnimatedThemeToggle(isDarkMode),
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: StreamBuilder<bool>(
+              stream: Stream.periodic(const Duration(seconds: 1),
+                  (_) => WebSocketService.instance.isConnected),
+              initialData: WebSocketService.instance.isConnected,
+              builder: (context, snapshot) {
+                final isConnected = snapshot.data ?? false;
+                return Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isConnected ? Colors.green : Colors.red,
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isConnected ? Colors.green : Colors.red)
+                            .withValues(alpha: 0.5),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+      drawer: _buildDrawer(context, student),
+      body: _sections[_selectedIndex],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 20,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            currentIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+            },
+            backgroundColor:
+                Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+            selectedItemColor: const Color(0xFF8B5CF6),
+            unselectedItemColor: Theme.of(context).hintColor,
+            selectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 12,
+            ),
             elevation: 0,
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
-                onPressed: () {
-                  Scaffold.of(context).openDrawer();
-                },
-              ),
-            ),
-            actions: [
-              IconButton(
-                icon: Icon(Icons.notifications_none_rounded,
-                    color: Theme.of(context).hintColor),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No new notifications'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-              ),
-              IconButton(
-                icon: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: _isReloading
-                      ? const SizedBox(
-                          key: ValueKey('loading'),
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFF8B5CF6),
-                          ),
-                        )
-                      : Icon(
-                          Icons.refresh_rounded,
-                          key: const ValueKey('refresh'),
-                          color: Theme.of(context).primaryColor,
-                          size: 22,
-                        ),
-                ),
-                onPressed: _isReloading ? null : _fullReload,
-              ),
-              _buildAnimatedThemeToggle(isDarkMode),
-              Container(
-                margin: const EdgeInsets.only(right: 8),
-                child: StreamBuilder<bool>(
-                  stream: Stream.periodic(const Duration(seconds: 1),
-                      (_) => WebSocketService.instance.isConnected),
-                  initialData: WebSocketService.instance.isConnected,
-                  builder: (context, snapshot) {
-                    final isConnected = snapshot.data ?? false;
-                    return Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isConnected ? Colors.green : Colors.red,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isConnected ? Colors.green : Colors.red)
-                                .withValues(alpha: 0.5),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            items: _navItems,
           ),
-          drawer: _buildDrawer(context, student),
-          body: _sections[_selectedIndex],
-          bottomNavigationBar: Container(
-            decoration: BoxDecoration(
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 20,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(24),
-                topRight: Radius.circular(24),
-              ),
-              child: BottomNavigationBar(
-                type: BottomNavigationBarType.fixed,
-                currentIndex: _selectedIndex,
-                onTap: (index) {
-                  setState(() {
-                    _selectedIndex = index;
-                  });
-                },
-                backgroundColor:
-                    Theme.of(context).bottomNavigationBarTheme.backgroundColor,
-                selectedItemColor: const Color(0xFF8B5CF6),
-                unselectedItemColor: Theme.of(context).hintColor,
-                selectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 12,
-                ),
-                elevation: 0,
-                items: _navItems,
-              ),
-            ),
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 

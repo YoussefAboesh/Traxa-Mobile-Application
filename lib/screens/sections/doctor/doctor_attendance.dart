@@ -43,6 +43,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   bool _showStudentList = false;
   bool _isActivating = false;
   bool _isCameraOpen = false;
+  bool _isFinalizing = false;
 
   // Live attendance
   List<Map<String, dynamic>> _attendanceRecords = [];
@@ -53,6 +54,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   Timer? _heartbeatTimer;
   Timer? _pollTimer;
   Timer? _confirmTimer;
+  Timer? _syncTimer;
   Duration _confirmRemaining = Duration.zero;
 
   bool _didCheckServer = false;
@@ -76,7 +78,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _tryRestoreSession());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncWithServer();
+    });
     _setupWebSocketListeners();
   }
 
@@ -85,6 +89,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     _heartbeatTimer?.cancel();
     _pollTimer?.cancel();
     _confirmTimer?.cancel();
+    _syncTimer?.cancel();
     super.dispose();
   }
 
@@ -115,38 +120,33 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
-    // استماع للجلسات الجديدة من أي جهاز
+    // Any session event → immediately sync with server (source of truth)
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
       final session = data['session'] as Map<String, dynamic>?;
       if (session == null) return;
-
       final authState = context.read<AuthCubit>().state;
-      final doctorId = authState.user?.id;
-
-      // لو الجلسة لدكتور تاني، مش هنعمل حاجة
-      if (session['doctorId'] != doctorId) return;
-
-      // لو فيه جلسة نشطة بالفعل، نطلب Full Sync
-      if (_phase != SessionPhase.none) {
-        _requestFullSync();
-        return;
-      }
-
-      // استعادة الجلسة من السيرفر
-      _restoreSessionFromData(session);
+      if (session['doctorId'] != authState.user?.id) return;
+      _syncWithServer();
     });
 
     ws.sessionEndedStream.listen((data) {
       if (!mounted) return;
-      final sessionId = data['sessionId'] as String?;
       final doctorId = data['doctorId'] as int?;
-
       final authState = context.read<AuthCubit>().state;
       if (doctorId != authState.user?.id) return;
+      _syncWithServer();
+    });
 
-      if (_activeSessionId == sessionId && _phase != SessionPhase.none) {
-        _snack('Session ended from another device', Colors.orange);
+    ws.reportSavedStream.listen((data) {
+      if (!mounted || _isFinalizing) return;
+      final report = data['report'] as Map<String, dynamic>?;
+      final sessionId = report?['sessionId'] as String?;
+      if (sessionId == _activeSessionId && _phase != SessionPhase.none) {
+        _snack('Session closed from website - report saved', const Color(0xFF0EA5E9));
+        _confirmTimer?.cancel();
+        _pollTimer?.cancel();
+        _heartbeatTimer?.cancel();
         _resetSession();
       }
     });
@@ -154,51 +154,29 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
-      if (type == 'FULL_SYNC') {
-        _tryRestoreSession();
+      final entity = data['entity'] as String?;
+      if (type == 'FULL_SYNC' || entity == 'attendance-session') {
+        _syncWithServer();
       }
     });
   }
 
-  Future<void> _requestFullSync() async {
-    final ws = WebSocketService.instance;
-    ws.sendMessage({'type': 'REQUEST_SYNC'});
-  }
-
-  Future<void> _restoreSessionFromData(Map<String, dynamic> sessionData) async {
-    final auth = context.read<AuthCubit>().state;
-    if (auth.token == null) return;
-
-    try {
-      final lectureId = sessionData['lectureId'] as int?;
-      final dataState = context.read<DataCubit>().state;
-      Lecture? lecture;
-      try {
-        lecture = dataState.lectures.firstWhere((l) => l.id == lectureId);
-      } catch (_) {}
-
-      if (lecture != null) {
-        final students =
-            await _getEnrolledStudents(lecture.subjectId, auth.token!);
-        setState(() {
-          _phase = SessionPhase.active;
-          _activeSession = lecture;
-          _activeSessionId = sessionData['sessionId'] as String?;
-          _sessionStartTime =
-              DateTime.tryParse(sessionData['startTime'] ?? '') ??
-                  DateTime.now();
-          _sessionStudents = students;
-          _showActiveSessions = true;
-        });
-        if (_activeSessionId != null) {
-          _startHeartbeat(_activeSessionId!, auth.token!);
-          _startPolling(_activeSessionId!, auth.token!);
-        }
-        _snack('Session restored from web', Colors.green);
+  void _startConfirmTimer() {
+    _confirmTimer?.cancel();
+    // Ensure sessionEndTime is set; fallback to now if missing
+    _sessionEndTime ??= DateTime.now();
+    _confirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
       }
-    } catch (e) {
-      print('Error restoring session: $e');
-    }
+      final remaining = _qrDuration - DateTime.now().difference(_sessionEndTime!);
+      setState(() => _confirmRemaining = remaining);
+      if (remaining.isNegative) {
+        timer.cancel();
+        _finalizeSession();
+      }
+    });
   }
 
   // ============================================
@@ -259,28 +237,161 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           if (lecture != null && mounted) {
             final students =
                 await _getEnrolledStudents(lecture.subjectId, auth.token!);
+
+            // Detect if session is in QR phase (server uses phase='qr' and qrPhaseEndTime)
+            final serverPhase = s['phase'] as String?;
+            final qrEndTimeStr = s['qrPhaseEndTime'] as String?;
+            final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
+            final isQrPhase = serverPhase == 'qr' && qrEndTime != null;
+
+            Duration? qrRemaining;
+            if (isQrPhase) {
+              final rem = qrEndTime.difference(DateTime.now());
+              qrRemaining = rem.isNegative ? Duration.zero : rem;
+            }
+
             setState(() {
-              _phase = SessionPhase.active;
+              _phase = isQrPhase ? SessionPhase.confirming : SessionPhase.active;
               _activeSession = lecture;
               _activeSessionId = s['sessionId'] as String?;
               _sessionStartTime =
                   DateTime.tryParse(s['startTime'] ?? s['createdAt'] ?? '') ??
                       DateTime.now();
+              _sessionEndTime = isQrPhase ? qrEndTime : null;
               _sessionStudents = students;
-              _isCameraOpen = true;
+              _isCameraOpen = !isQrPhase;
               _showActiveSessions = true;
+              if (isQrPhase) {
+                _confirmRemaining = (qrRemaining != null && !qrRemaining.isNegative)
+                    ? qrRemaining
+                    : _qrDuration;
+              }
             });
             if (_activeSessionId != null) {
               _startHeartbeat(_activeSessionId!, auth.token!);
               _startPolling(_activeSessionId!, auth.token!);
+              _startContinuousSync();
             }
+            if (isQrPhase) _startConfirmTimer();
           }
         }
       }
     } catch (_) {}
   }
 
+  // ============================================
+  // Continuous Server Sync (Source of Truth)
+  // ============================================
+  void _startContinuousSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(const Duration(seconds: 8), (_) => _syncWithServer());
+  }
+
+  Future<void> _syncWithServer() async {
+    if (!mounted || _isActivating || _isFinalizing) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null || auth.user == null) return;
+
+    try {
+      final res = await http
+          .get(
+            Uri.parse('${AppConstants.baseUrl}/api/active-sessions/doctor/${auth.user!.id}'),
+            headers: _headers(auth.token!),
+          )
+          .timeout(const Duration(seconds: 5));
+
+      if (!mounted) return;
+
+      if (res.statusCode != 200) return;
+
+      final sessions = jsonDecode(res.body) as List;
+
+      // ── No session on server ──────────────────────────────────────
+      if (sessions.isEmpty) {
+        if (_phase != SessionPhase.none) {
+          _snack('Session closed from another device', const Color(0xFF0EA5E9));
+          _confirmTimer?.cancel();
+          _pollTimer?.cancel();
+          _heartbeatTimer?.cancel();
+          _resetSession();
+        }
+        return;
+      }
+
+      final s = sessions.first as Map<String, dynamic>;
+      final serverSessionId = s['sessionId'] as String?;
+      final serverPhase = s['phase'] as String?;
+      // Server uses phase='qr' and qrPhaseEndTime (not 'qr_mode' / endedAt)
+      final qrEndTimeStr = s['qrPhaseEndTime'] as String?;
+      final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
+      final isQrPhase = serverPhase == 'qr' && qrEndTime != null;
+
+      // ── App has NO session but server has one → restore it ────────
+      if (_phase == SessionPhase.none) {
+        final ds = context.read<DataCubit>().state;
+        Lecture? lecture;
+        try {
+          lecture = ds.lectures.firstWhere((l) => l.id == s['lectureId']);
+        } catch (_) {}
+        if (lecture == null) return;
+
+        final students = await _getEnrolledStudents(lecture.subjectId, auth.token!);
+        if (!mounted) return;
+
+        Duration qrRemaining = _qrDuration;
+        if (isQrPhase) {
+          final rem = qrEndTime.difference(DateTime.now());
+          if (rem.isNegative) return; // expired — ignore
+          qrRemaining = rem;
+        }
+
+        setState(() {
+          _phase = isQrPhase ? SessionPhase.confirming : SessionPhase.active;
+          _activeSession = lecture;
+          _activeSessionId = serverSessionId;
+          _sessionStartTime = DateTime.tryParse(s['startTime'] ?? s['createdAt'] ?? '') ?? DateTime.now();
+          _sessionEndTime = isQrPhase ? qrEndTime : null;
+          _sessionStudents = students;
+          _isCameraOpen = !isQrPhase;
+          _showActiveSessions = true;
+          if (isQrPhase) _confirmRemaining = qrRemaining;
+        });
+        if (_activeSessionId != null) {
+          _startHeartbeat(_activeSessionId!, auth.token!);
+          _startPolling(_activeSessionId!, auth.token!);
+        }
+        if (isQrPhase) _startConfirmTimer();
+        _snack('Session synced from server', Colors.green);
+        return;
+      }
+
+      // ── Different session ID → full reset + restore ───────────────
+      if (_activeSessionId != serverSessionId) {
+        _confirmTimer?.cancel();
+        _pollTimer?.cancel();
+        _heartbeatTimer?.cancel();
+        _resetSession();
+        _didCheckServer = false;
+        await _tryRestoreSession();
+        return;
+      }
+
+      // ── Same session, but phase changed to QR ────────────────────
+      if (_phase == SessionPhase.active && isQrPhase) {
+        final remaining = qrEndTime.difference(DateTime.now());
+        setState(() {
+          _phase = SessionPhase.confirming;
+          _sessionEndTime = qrEndTime;
+          _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
+        });
+        _startConfirmTimer();
+        _snack('QR mode synced from server', Colors.orange);
+      }
+    } catch (_) {}
+  }
+
   void _resetSession() {
+    _syncTimer?.cancel();
     setState(() {
       _phase = SessionPhase.none;
       _activeSession = null;
@@ -388,6 +499,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           final d = jsonDecode(res.body);
           errMsg = d['error'] ?? d['message'] ?? errMsg;
         } catch (_) {}
+        if (!mounted) return;
         _snack(errMsg, Colors.red);
         setState(() => _isActivating = false);
         return;
@@ -431,6 +543,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       // Get enrolled students (from cache or API)
       final students = await _getEnrolledStudents(lecture.subjectId, token);
 
+      if (!mounted) return;
+
       setState(() {
         _phase = SessionPhase.active;
         _activeSession = lecture;
@@ -449,91 +563,101 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
       _startHeartbeat(sessionId, token);
       _startPolling(sessionId, token);
+      _startContinuousSync();
       _snack(
           'Session started: ${lecture.subjectName} (${students.length} students)${camOk ? ' - Camera running' : ''}',
           Colors.green);
     } catch (e) {
       debugPrint('Activate error: $e');
+      if (!mounted) return;
       _snack('Connection error: $e', Colors.red);
       setState(() => _isActivating = false);
     }
   }
 
 // ============================================
-// 2. END SESSION with WebSocket Broadcast (محسنة)
+// 2. END SESSION — enter QR phase + sync to website
 // ============================================
   Future<void> _endSession() async {
     if (_activeSessionId == null) return;
-    final now = DateTime.now();
-
-    setState(() {
-      _phase = SessionPhase.confirming;
-      _sessionEndTime = now;
-      _confirmRemaining = _qrDuration;
-    });
-
-    // ✅ Broadcast session ended to all clients BEFORE the QR window
-    final ws = WebSocketService.instance;
     final authState = context.read<AuthCubit>().state;
+    if (authState.token == null) return;
 
-    ws.sendMessage({
-      'type': 'SESSION_ENDED',
-      'sessionId': _activeSessionId,
-      'doctorId': authState.user?.id,
-      'doctorName': authState.user?.name,
-      'subjectName': _activeSession?.subjectName,
-      'endedAt': now.toIso8601String(),
-      'timestamp': DateTime.now().toIso8601String()
-    });
+    try {
+      // Call the correct server endpoint — this sets phase='qr', stores qrPhaseEndTime,
+      // and broadcasts DATA_CHANGE active-session qr-phase-started to ALL clients.
+      final res = await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/begin-qr-phase'),
+        headers: _headers(authState.token!),
+        body: jsonEncode({'durationMinutes': 30}),
+      ).timeout(const Duration(seconds: 8));
 
-    print('📡 Broadcasted SESSION_ENDED for: $_activeSessionId');
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final qrEndTimeStr = body['qrPhaseEndTime'] as String?;
+        final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
+        final remaining = qrEndTime != null
+            ? qrEndTime.difference(DateTime.now())
+            : _qrDuration;
 
-    _confirmTimer?.cancel();
-    _confirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
+        setState(() {
+          _phase = SessionPhase.confirming;
+          _sessionEndTime = qrEndTime ?? DateTime.now();
+          _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
+        });
+        _startConfirmTimer();
+        _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
+      } else {
+        _snack('Failed to end session (${res.statusCode})', Colors.red);
       }
-      final remaining =
-          _qrDuration - DateTime.now().difference(_sessionEndTime!);
-      setState(() => _confirmRemaining = remaining);
-      if (remaining.isNegative) {
-        timer.cancel();
-        _finalizeSession();
-      }
-    });
-
-    _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
+    } catch (e) {
+      _snack('Connection error ending session', Colors.red);
+    }
   }
 
 // ============================================
-// 3. FINALIZE — close camera + send report with WebSocket Sync (محسنة)
+// 3. FINALIZE — close camera + send report + sync to website
 // ============================================
   Future<void> _finalizeSession() async {
     _confirmTimer?.cancel();
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _syncTimer?.cancel();
+    _isFinalizing = true;
 
     final auth = context.read<AuthCubit>().state;
-    if (auth.token == null) return;
+    if (auth.token == null) {
+      _isFinalizing = false;
+      return;
+    }
+
+    // Snapshot session data before we clear state
+    final sessionIdSnapshot = _activeSessionId;
+    final sessionStudentsSnapshot = List<Student>.from(_sessionStudents ?? []);
+    final attendanceSnapshot = List<Map<String, dynamic>>.from(_attendanceRecords);
+    final confirmedSnapshot = _confirmedCount;
+    final pendingSnapshot = _pendingCount;
 
     Map<String, dynamic>? report;
 
     try {
-      // Delete session → camera closes
+      // Delete session → camera closes + removes from server
       final deleteRes = await http
           .delete(
             Uri.parse(
-                '${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId'),
+                '${AppConstants.baseUrl}/api/active-sessions/$sessionIdSnapshot'),
             headers: _headers(auth.token!),
           )
           .timeout(const Duration(seconds: 10));
 
       print('Delete session response: ${deleteRes.statusCode}');
+      if (deleteRes.statusCode != 200 && deleteRes.statusCode != 204) {
+        print('⚠️ Session delete returned ${deleteRes.statusCode}: ${deleteRes.body}');
+      }
 
-      // Build report
-      final rptStudents = _sessionStudents?.map((s) {
-            final rec = _attendanceRecords
+      // Build report using snapshots (safe even if state is cleared mid-flight)
+      final rptStudents = sessionStudentsSnapshot.map((s) {
+            final rec = attendanceSnapshot
                 .cast<Map<String, dynamic>?>()
                 .firstWhere(
                     (r) =>
@@ -546,8 +670,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             String? dur;
             if (faceAt.toString().isNotEmpty && qrAt.toString().isNotEmpty) {
               try {
-                final d =
-                    DateTime.parse(qrAt).difference(DateTime.parse(faceAt));
+                final d = DateTime.parse(qrAt).difference(DateTime.parse(faceAt));
                 dur = d.inHours > 0
                     ? '${d.inHours}h ${d.inMinutes % 60}m'
                     : '${d.inMinutes}m';
@@ -564,11 +687,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               'confirmed_by': rec?['confirmed_by'],
               'attendance_duration': dur,
             };
-          }).toList() ??
-          [];
+          }).toList();
 
       report = {
-        'sessionId': _activeSessionId,
+        'sessionId': sessionIdSnapshot,
         'lectureId': _activeSession?.id,
         'doctorId': auth.user?.id,
         'doctorName': auth.user?.name,
@@ -577,11 +699,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'department': _activeSession?.department,
         'createdAt': _sessionStartTime?.toIso8601String(),
         'endedAt': _sessionEndTime?.toIso8601String(),
-        'totalStudents': _sessionStudents?.length ?? 0,
-        'presentCount': _confirmedCount,
-        'pendingCount': _pendingCount,
-        'absentCount':
-            (_sessionStudents?.length ?? 0) - _confirmedCount - _pendingCount,
+        'totalStudents': sessionStudentsSnapshot.length,
+        'presentCount': confirmedSnapshot,
+        'pendingCount': pendingSnapshot,
+        'absentCount': sessionStudentsSnapshot.length - confirmedSnapshot - pendingSnapshot,
         'students': rptStudents,
       };
 
@@ -610,20 +731,24 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       debugPrint('Finalize error: $e');
     }
 
-    setState(() {
-      _phase = SessionPhase.none;
-      _activeSession = null;
-      _activeSessionId = null;
-      _sessionStartTime = null;
-      _sessionEndTime = null;
-      _sessionStudents = null;
-      _isCameraOpen = false;
-      _confirmedCount = 0;
-      _pendingCount = 0;
-      _attendanceRecords = [];
-    });
+    _isFinalizing = false;
 
-    _snack('Camera closed - Report saved', const Color(0xFF0EA5E9));
+    if (mounted) {
+      setState(() {
+        _phase = SessionPhase.none;
+        _activeSession = null;
+        _activeSessionId = null;
+        _sessionStartTime = null;
+        _sessionEndTime = null;
+        _sessionStudents = null;
+        _isCameraOpen = false;
+        _confirmedCount = 0;
+        _pendingCount = 0;
+        _attendanceRecords = [];
+      });
+
+      _snack('Camera closed - Report saved', const Color(0xFF0EA5E9));
+    }
   }
 
   // ============================================
@@ -653,16 +778,48 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               headers: _headers(token),
             )
             .timeout(const Duration(seconds: 5));
+
+        // Session deleted from another device (website final close)
+        if (res.statusCode == 404 && mounted && _phase != SessionPhase.none) {
+          _snack('Session closed from another device', const Color(0xFF0EA5E9));
+          _confirmTimer?.cancel();
+          _pollTimer?.cancel();
+          _heartbeatTimer?.cancel();
+          _resetSession();
+          return;
+        }
+
         if (res.statusCode == 200 && mounted) {
           final data = jsonDecode(res.body);
           final recs =
               (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-          setState(() {
-            _attendanceRecords = recs;
-            _confirmedCount =
-                recs.where((r) => r['status'] == 'confirmed').length;
-            _pendingCount = recs.where((r) => r['status'] == 'pending').length;
-          });
+
+          // Detect QR phase change from website (fallback if WebSocket missed)
+          // Server uses phase='qr' and qrPhaseEndTime (not 'qr_mode' / endedAt)
+          final sessionPhase = (data['session']?['phase'] ?? data['phase']) as String?;
+          final qrEndTimeStr = (data['session']?['qrPhaseEndTime'] ?? data['qrPhaseEndTime']) as String?;
+          final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
+
+          if (sessionPhase == 'qr' && _phase == SessionPhase.active && qrEndTime != null) {
+            final remaining = qrEndTime.difference(DateTime.now());
+            setState(() {
+              _phase = SessionPhase.confirming;
+              _sessionEndTime = qrEndTime;
+              _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
+              _attendanceRecords = recs;
+              _confirmedCount = recs.where((r) => r['status'] == 'confirmed').length;
+              _pendingCount = recs.where((r) => r['status'] == 'pending').length;
+            });
+            _startConfirmTimer();
+            _snack('QR mode synced from server', Colors.orange);
+          } else {
+            setState(() {
+              _attendanceRecords = recs;
+              _confirmedCount =
+                  recs.where((r) => r['status'] == 'confirmed').length;
+              _pendingCount = recs.where((r) => r['status'] == 'pending').length;
+            });
+          }
         }
       } catch (_) {}
     });
@@ -723,6 +880,102 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     } catch (e) {
       _snack('Error: $e', Colors.red);
     }
+  }
+
+  // ============================================
+  // Manual Attendance Confirmation
+  // ============================================
+  Future<void> _confirmStudent(Student student) async {
+    if (_activeSessionId == null) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+    try {
+      await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/manual-attendance'),
+        headers: _headers(auth.token!),
+        body: jsonEncode({
+          'studentId': student.id,
+          'studentIdNumber': student.studentId,
+          'action': 'confirm',
+        }),
+      ).timeout(const Duration(seconds: 8));
+      _refreshAttendanceNow();
+    } catch (e) {
+      _snack('Error confirming student', Colors.red);
+    }
+  }
+
+  Future<void> _rejectStudent(Student student) async {
+    if (_activeSessionId == null) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+    try {
+      await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/manual-attendance'),
+        headers: _headers(auth.token!),
+        body: jsonEncode({
+          'studentId': student.id,
+          'studentIdNumber': student.studentId,
+          'action': 'reject',
+        }),
+      ).timeout(const Duration(seconds: 8));
+      _refreshAttendanceNow();
+    } catch (e) {
+      _snack('Error rejecting student', Colors.red);
+    }
+  }
+
+  Future<void> _confirmAllPending() async {
+    if (_activeSessionId == null) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+    try {
+      await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/confirm-all-pending'),
+        headers: _headers(auth.token!),
+      ).timeout(const Duration(seconds: 8));
+      _snack('All pending confirmed', Colors.green);
+      _refreshAttendanceNow();
+    } catch (e) {
+      _snack('Error confirming all', Colors.red);
+    }
+  }
+
+  Future<void> _rejectAllPending() async {
+    if (_activeSessionId == null) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+    try {
+      await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/reject-all-pending'),
+        headers: _headers(auth.token!),
+      ).timeout(const Duration(seconds: 8));
+      _snack('All pending rejected', Colors.red);
+      _refreshAttendanceNow();
+    } catch (e) {
+      _snack('Error rejecting all', Colors.red);
+    }
+  }
+
+  Future<void> _refreshAttendanceNow() async {
+    if (_activeSessionId == null) return;
+    final auth = context.read<AuthCubit>().state;
+    if (auth.token == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/attendance-session-data/$_activeSessionId'),
+        headers: _headers(auth.token!),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200 && mounted) {
+        final data = jsonDecode(res.body);
+        final recs = (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        setState(() {
+          _attendanceRecords = recs;
+          _confirmedCount = recs.where((r) => r['status'] == 'confirmed').length;
+          _pendingCount = recs.where((r) => r['status'] == 'pending').length;
+        });
+      }
+    } catch (_) {}
   }
 
   // ============================================
@@ -1449,8 +1702,16 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF0EA5E9)))),
                       SizedBox(
-                          width: 70,
+                          width: 60,
                           child: Text('STATUS',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0EA5E9)),
+                              textAlign: TextAlign.center)),
+                      SizedBox(
+                          width: 68,
+                          child: Text('ACTIONS',
                               style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
@@ -1480,7 +1741,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
                     return Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         border: Border(
                             bottom: BorderSide(
@@ -1505,10 +1766,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                                         ? Colors.white
                                         : const Color(0xFF1E293B)))),
                         SizedBox(
-                          width: 70,
+                          width: 60,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                                horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
                                 color: statusColor.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(10)),
@@ -1520,9 +1781,92 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                                 textAlign: TextAlign.center),
                           ),
                         ),
+                        SizedBox(
+                          width: 68,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (status != 'confirmed')
+                                GestureDetector(
+                                  onTap: () => _confirmStudent(student),
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.check,
+                                        size: 16, color: Color(0xFF10B981)),
+                                  ),
+                                ),
+                              if (status != 'confirmed') const SizedBox(width: 4),
+                              if (status != 'absent')
+                                GestureDetector(
+                                  onTap: () => _rejectStudent(student),
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.close,
+                                        size: 16, color: Colors.red),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ]),
                     );
                   }),
+                  // Bulk action buttons
+                  if (_pendingCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _isDark
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(12),
+                            bottomRight: Radius.circular(12)),
+                      ),
+                      child: Row(children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _confirmAllPending,
+                            icon: const Icon(Icons.check_circle_outline, size: 14),
+                            label: const Text('Confirm All Pending',
+                                style: TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF10B981),
+                              side: const BorderSide(color: Color(0xFF10B981)),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _rejectAllPending,
+                            icon: const Icon(Icons.cancel_outlined, size: 14),
+                            label: const Text('Reject All Pending',
+                                style: TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
                 ],
               ),
             ),

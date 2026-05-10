@@ -335,20 +335,58 @@ class ApiService {
     }
   }
 
+  static const String _cachedAcademicYearKey = 'system_academic_year';
+
+  // Called by WebSocket when admin updates the academic year
+  static Future<void> persistAcademicYear(String year) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cachedAcademicYearKey, year);
+    print('💾 Academic year persisted: $year');
+  }
+
   static Future<String> getCurrentAcademicYear() async {
+    // 1. Try HTTP (semester-mode — no auth, same source as WebSocket broadcasts)
     try {
-      final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/academic/settings'),
+      final res = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/system/semester-mode'),
       );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['current_academic_year'] ?? '2026-2027';
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final yr = d['academicYear'] ?? d['academic_year'] ??
+            d['year'] ?? d['current_academic_year'] ?? d['currentAcademicYear'];
+        if (yr != null && yr.toString().contains('-')) {
+          await persistAcademicYear(yr.toString());
+          return yr.toString();
+        }
       }
-      return '2026-2027';
-    } catch (e) {
-      print('❌ Error getting academic year: $e');
-      return '2026-2027';
+    } catch (_) {}
+
+    // 2. Try academic/settings (with auth)
+    try {
+      final res = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/academic/settings'),
+        headers: _headers,
+      );
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final yr = d['current_academic_year'] ?? d['academicYear'] ??
+            d['academic_year'] ?? d['year'];
+        if (yr != null && yr.toString().contains('-')) {
+          await persistAcademicYear(yr.toString());
+          return yr.toString();
+        }
+      }
+    } catch (_) {}
+
+    // 3. Fallback: last value set by admin via WebSocket (persisted in SharedPreferences)
+    final prefs = await SharedPreferences.getInstance();
+    final cached = prefs.getString(_cachedAcademicYearKey);
+    if (cached != null && cached.contains('-')) {
+      print('📦 Academic year loaded from cache: $cached');
+      return cached;
     }
+
+    return '2026-2027';
   }
 
   // ✅ FIXED: attendance with proper token handling

@@ -230,12 +230,19 @@ class WebSocketService {
           }
           break;
         case 'ACADEMIC_YEAR_CHANGED':
-          // ✅ Handle academic year change from server broadcast
-          final year = data['value'] ?? data['academicYear'];
-          if (year != null) {
-            print('📢 Academic year changed to: $year');
-            if (_academicYearController != null && !_academicYearController!.isClosed) {
-              _academicYearController?.add(year.toString());
+          {
+            final year = data['value'] ??
+                data['academicYear'] ??
+                data['academic_year'] ??
+                data['year'] ??
+                data['newYear'] ??
+                data['current_academic_year'];
+            if (year != null) {
+              print('📢 Academic year changed to: $year');
+              _persistAcademicYear(year.toString());
+              if (_academicYearController != null && !_academicYearController!.isClosed) {
+                _academicYearController?.add(year.toString());
+              }
             }
           }
           break;
@@ -305,12 +312,11 @@ class WebSocketService {
 
     switch (entity) {
       case 'grade':
-        if (action == 'created' || action == 'updated') {
+        {
+          // handle any grade change: created, updated, hidden, shown, etc.
           final gradeData = data['data'] as Map<String, dynamic>?;
-          if (gradeData != null) {
-            if (_gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
-              _gradeUpdateController?.add(gradeData);
-            }
+          if (gradeData != null && _gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
+            _gradeUpdateController?.add(gradeData);
           }
         }
         break;
@@ -325,21 +331,22 @@ class WebSocketService {
         }
         break;
       case 'academic':
-        if (action == 'academic-year-changed') {
-          // ✅ Handle academic year change from DATA_CHANGE broadcast
-          final yearData = data['data'] as Map<String, dynamic>?;
-          if (yearData != null) {
-            final newYear = yearData['newYear'] as String?;
-            if (newYear != null) {
-              print('📢 Academic year changed via DATA_CHANGE: $newYear');
-              if (_academicYearController != null && !_academicYearController!.isClosed) {
-                _academicYearController?.add(newYear);
-              }
-            }
-          }
-        } else if (action == 'levels-promoted') {
+        if (action == 'levels-promoted') {
           if (_levelsPromotedController != null && !_levelsPromotedController!.isClosed) {
             _levelsPromotedController?.add(data);
+          }
+        } else {
+          // any other academic action → try to extract academic year
+          final yearData = data['data'] as Map<String, dynamic>?;
+          final newYear = yearData?['newYear'] ??
+              yearData?['academicYear'] ??
+              yearData?['academic_year'] ??
+              yearData?['year'] ??
+              yearData?['current_academic_year'];
+          if (newYear != null && _academicYearController != null && !_academicYearController!.isClosed) {
+            print('📢 Academic year changed via DATA_CHANGE ($action): $newYear');
+            _persistAcademicYear(newYear.toString());
+            _academicYearController?.add(newYear.toString());
           }
         }
         break;
@@ -356,21 +363,55 @@ class WebSocketService {
           }
         }
         break;
+      case 'system':
+        {
+          final systemData = data['data'] as Map<String, dynamic>?;
+          if (systemData != null) {
+            final semester = systemData['semester'] as int?;
+            if (semester != null && _semesterController != null && !_semesterController!.isClosed) {
+              print('📢 System: semester changed to S$semester');
+              _semesterController?.add(semester);
+            }
+            final academicYear = systemData['academicYear'] ??
+                systemData['academic_year'] ??
+                systemData['year'] ??
+                systemData['current_academic_year'] ??
+                systemData['newYear'];
+            if (academicYear != null && _academicYearController != null && !_academicYearController!.isClosed) {
+              print('📢 System: academic year changed to $academicYear');
+              _persistAcademicYear(academicYear.toString());
+              _academicYearController?.add(academicYear.toString());
+            }
+          }
+        }
+        break;
       case 'attendance-session':
-        if (action == 'ended') {
+      case 'active-session':
+        if (action == 'created' || action == 'qr-phase-started') {
+          final sessionData = data['data'] as Map<String, dynamic>?;
+          if (sessionData != null && _sessionActivatedController != null && !_sessionActivatedController!.isClosed) {
+            _sessionActivatedController?.add({'session': sessionData, 'action': action});
+          }
+        } else if (action == 'ended') {
           final sessionData = data['data'] as Map<String, dynamic>?;
           if (sessionData != null) {
             if (_sessionEndedController != null && !_sessionEndedController!.isClosed) {
               _sessionEndedController?.add({
                 'sessionId': sessionData['sessionId'],
                 'doctorId': sessionData['doctorId'],
-                'report': sessionData['report']
               });
             }
           }
         }
         break;
     }
+  }
+
+  void _persistAcademicYear(String year) {
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString('system_academic_year', year);
+      print('💾 Academic year persisted via WS: $year');
+    });
   }
 
   void sendMessage(Map<String, dynamic> message) {

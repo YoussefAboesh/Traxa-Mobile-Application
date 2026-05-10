@@ -76,9 +76,9 @@ class _StudentGradesState extends State<StudentGrades> {
     final allSubjects = dataState.allSubjects;
     final allGrades = dataState.allGrades; // ✅ All grades from all semesters
 
-    // ✅ Get grades for this student
+    // ✅ Get visible grades for this student only
     final studentGrades =
-        allGrades.where((g) => g.studentId == student.id).toList();
+        allGrades.where((g) => g.studentId == student.id && g.isVisible).toList();
 
     // ✅ Filter by selected semester (if not "All")
     List<Grade> filteredGrades = List.from(studentGrades);

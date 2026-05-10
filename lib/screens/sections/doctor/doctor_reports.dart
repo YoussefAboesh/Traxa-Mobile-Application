@@ -1,5 +1,6 @@
 // lib/screens/sections/doctor/doctor_reports.dart
 // ✅ Fixes: 12-hour time + local timezone + working PDF download + RefreshIndicator + Delete Reports
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -7,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../core/constants.dart';
 import '../../../core/pdf_report_service.dart';
+import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
 
 class DoctorReports extends StatefulWidget {
@@ -21,11 +23,38 @@ class _DoctorReportsState extends State<DoctorReports> {
   bool _isLoading = true;
   String? _error;
   bool _isDeleting = false;
+  StreamSubscription? _reportSavedSub;
+  StreamSubscription? _sessionEndedSub;
 
   @override
   void initState() {
     super.initState();
     _loadReports();
+    _setupWebSocketListeners();
+  }
+
+  void _setupWebSocketListeners() {
+    final ws = WebSocketService.instance;
+
+    _reportSavedSub = ws.reportSavedStream.listen((data) {
+      if (!mounted) return;
+      _loadReports();
+      ToastMessage.showSuccess(context, 'New attendance report saved');
+    });
+
+    _sessionEndedSub = ws.sessionEndedStream.listen((data) {
+      if (!mounted) return;
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) _loadReports();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _reportSavedSub?.cancel();
+    _sessionEndedSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadReports() async {

@@ -37,10 +37,10 @@ class _LoginScreenState extends State<LoginScreen> {
     final authCubit = context.read<AuthCubit>();
     
     await authCubit.login(
-          username: _usernameController.text.trim(),
-          password: _passwordController.text,
-          isStudent: _isStudentLogin,
-        );
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
+      isStudent: _isStudentLogin,
+    );
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -62,25 +62,30 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // ✅ معالجة النجاح
+        // ✅ معالجة النجاح - REFRESH تلقائي بعد Login
         if (state.isAuthenticated && state.user != null) {
           final dataCubit = context.read<DataCubit>();
           final userName = state.user?.name ?? "User";
 
-          // جلب البيانات الأساسية
-          await dataCubit.loadAllData();
-
-          // جلب الدرجات للطالب
+          print('✅ Login successful, loading fresh data...');
+          
+          // ✅ 1. جلب جميع البيانات الأساسية (أحدث إصدار)
+          await dataCubit.fullReload();
+          
+          // ✅ 2. جلب الدرجات للطالب
           if (!state.user!.isDoctor && state.user != null && state.token != null) {
             final studentId = state.user!.id;
             final token = state.token!;
             await dataCubit.loadStudentGradesWithToken(studentId, token);
             await dataCubit.checkGradesStatus(studentId, token);
           }
-
-          // ✅ التحقق من context.mounted بعد العمليات غير المتزامنة
+          
+          // ✅ 3. تحديث الـ UI بعد تحميل البيانات
           if (context.mounted) {
             ErrorHandler.showSuccessSnackBar(context, 'Welcome $userName!');
+            
+            // ✅ 4. التنقل إلى الصفحة الرئيسية بعد تحميل البيانات
+            // (الـ MaterialApp هيتعامل مع الـ navigation تلقائياً)
           }
         }
       },
@@ -441,8 +446,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-
-
                   ],
                 ),
               ),
