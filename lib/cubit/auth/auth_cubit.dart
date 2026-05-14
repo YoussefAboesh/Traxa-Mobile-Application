@@ -6,6 +6,7 @@ import '../../core/api_service.dart';
 import '../../core/constants.dart';
 import '../../models/user.dart';
 import '../../services/websocket_service.dart';
+import '../../services/secure_storage_service.dart';
 import 'auth_state.dart';
 
 class AuthCubit extends Cubit<AuthState> {
@@ -14,21 +15,27 @@ class AuthCubit extends Cubit<AuthState> {
   }
 
   Future<void> checkAuth() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(AppConstants.tokenKey);
-    final userData = prefs.getString(AppConstants.userDataKey);
+    try {
+      // Load token and user data from secure storage (encrypted)
+      final token = await SecureStorageService.getToken();
+      final userDataJson = await SecureStorageService.getUserData();
 
-    if (token != null && userData != null) {
-      try {
-        final userJson = jsonDecode(userData);
-        final user = User.fromJson(userJson);
-        ApiService.setToken(token);
-        emit(AuthState.success(user, token));
-        await WebSocketService.instance.connect();
-      } catch (e) {
-        emit(AuthState.error('Failed to restore session'));
+      if (token != null && userDataJson != null) {
+        try {
+          final userJson = jsonDecode(userDataJson);
+          final user = User.fromJson(userJson);
+          ApiService.setToken(token);
+          emit(AuthState.success(user, token));
+          await WebSocketService.instance.connect();
+          print('✅ Session restored from secure storage');
+        } catch (e) {
+          emit(AuthState.error('Failed to restore session'));
+        }
+      } else {
+        emit(AuthState.initial());
       }
-    } else {
+    } catch (e) {
+      print('❌ Error checking auth: $e');
       emit(AuthState.initial());
     }
   }
@@ -64,10 +71,12 @@ class AuthCubit extends Cubit<AuthState> {
 
         ApiService.setToken(token);
 
+        // Save to secure storage (encrypted)
+        await SecureStorageService.saveToken(token as String);
+        await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
+
+        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(AppConstants.tokenKey, token as String);
-        await prefs.setString(
-            AppConstants.userDataKey, jsonEncode(user.toJson()));
         await prefs.setString(AppConstants.userTypeKey,
             user.userType ?? (isStudent ? 'student' : 'doctor'));
 
@@ -105,10 +114,12 @@ class AuthCubit extends Cubit<AuthState> {
 
         ApiService.setToken(token);
 
+        // Save to secure storage (encrypted)
+        await SecureStorageService.saveToken(token as String);
+        await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
+
+        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(AppConstants.tokenKey, token as String);
-        await prefs.setString(
-            AppConstants.userDataKey, jsonEncode(user.toJson()));
         await prefs.setString(AppConstants.userTypeKey, 'student');
 
         emit(AuthState.success(user, token));
@@ -140,10 +151,12 @@ class AuthCubit extends Cubit<AuthState> {
 
         ApiService.setToken(token);
 
+        // Save to secure storage (encrypted)
+        await SecureStorageService.saveToken(token as String);
+        await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
+
+        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(AppConstants.tokenKey, token as String);
-        await prefs.setString(
-            AppConstants.userDataKey, jsonEncode(user.toJson()));
         await prefs.setString(AppConstants.userTypeKey, 'doctor');
 
         emit(AuthState.success(user, token));
@@ -178,18 +191,19 @@ class AuthCubit extends Cubit<AuthState> {
       permissions: Map<String, dynamic>.from(newPerms),
     );
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        AppConstants.userDataKey, jsonEncode(updated.toJson()));
+    // Save to secure storage (encrypted)
+    await SecureStorageService.saveUserData(jsonEncode(updated.toJson()));
 
     emit(AuthState.success(updated, token));
     print('🔄 User permissions updated in AuthCubit');
   }
 
   Future<void> logout() async {
+    // Clear from secure storage
+    await SecureStorageService.clearAll();
+
+    // Clear from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(AppConstants.tokenKey);
-    await prefs.remove(AppConstants.userDataKey);
     await prefs.remove(AppConstants.userTypeKey);
 
     ApiService.setToken(null);
@@ -253,15 +267,16 @@ class AuthCubit extends Cubit<AuthState> {
           };
         }
       }
-      
+
       if (freshUserData != null) {
         final updatedUser = User.fromJson(freshUserData);
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(AppConstants.userDataKey, jsonEncode(updatedUser.toJson()));
-        
+
+        // Save to secure storage (encrypted)
+        await SecureStorageService.saveUserData(
+            jsonEncode(updatedUser.toJson()));
+
         emit(AuthState.success(updatedUser, token));
-        
+
         print('✅ User data refreshed successfully');
       }
     } catch (e) {

@@ -1,3 +1,4 @@
+// lib/models/user.dart
 class User {
   final int id;
   final String username;
@@ -9,6 +10,8 @@ class User {
   final String? supervisorDoctorName;
   final int? taId;
   final Map<String, dynamic>? permissions;
+  final String? department;   // ✅ أضف هذا
+  final int? level;           // ✅ أضف هذا
 
   User({
     required this.id,
@@ -21,6 +24,8 @@ class User {
     this.supervisorDoctorName,
     this.taId,
     this.permissions,
+    this.department,    // ✅
+    this.level,         // ✅
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -35,6 +40,8 @@ class User {
       supervisorDoctorName: json['supervisorDoctorName'],
       taId: json['taId'],
       permissions: json['permissions'] != null ? Map<String, dynamic>.from(json['permissions']) : null,
+      department: json['department'],   // ✅
+      level: json['level'],             // ✅
     );
   }
 
@@ -50,6 +57,8 @@ class User {
       'supervisorDoctorName': supervisorDoctorName,
       'taId': taId,
       'permissions': permissions,
+      'department': department,   // ✅
+      'level': level,             // ✅
     };
   }
 
@@ -58,12 +67,9 @@ class User {
   bool get isTeachingAssistant =>
       userType == 'teaching-assistant' || role == 'teaching-assistant';
 
-  /// The doctor id whose data this user should see.
-  /// For a doctor → their own id. For a TA → their supervising doctor's id.
   int get effectiveDoctorId =>
       isTeachingAssistant ? (supervisorDoctorId ?? id) : id;
 
-  /// True if a TA permission key is granted. Doctors always return true.
   bool hasTAPermission(String key) {
     if (!isTeachingAssistant) return true;
     final v = permissions?[key];

@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../cubit/theme/theme_cubit.dart';
@@ -25,14 +26,10 @@ class _DoctorScreenState extends State<DoctorScreen> {
   int _selectedIndex = 0;
   bool _isReloading = false;
   
-  // Local variables for immediate UI update
   String _localAcademicYear = '2026-2027';
   int _localSemester = 1;
-  
-  // Store the new year from WebSocket
   String _pendingAcademicYear = '';
 
-  // Each tab is keyed so we can filter for TA based on permissions.
   static const _allTabs = [
     {'key': 'ta.nav.overview', 'label': 'Home', 'icon': Icons.dashboard_rounded},
     {'key': 'ta.nav.subjects', 'label': 'Subjects', 'icon': Icons.book_rounded},
@@ -48,8 +45,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
   ];
 
   List<Map<String, Object>> _visibleTabs(dynamic user) {
-    // Tabs themselves are always visible. Action-level permissions
-    // (ta.attendance.start, ta.reports.export, …) gate the buttons inside.
     return _allTabs.map((t) => Map<String, Object>.from(t)).toList();
   }
 
@@ -68,10 +63,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
   Future<void> _loadFreshDataOnStart() async {
     try {
       print('🔄 Loading fresh data on app start...');
-      // ignore: use_build_context_synchronously
       await context.read<DataCubit>().fullReload();
-
-      // ignore: use_build_context_synchronously
       final updatedState = context.read<DataCubit>().state;
       if (mounted) {
         setState(() {
@@ -91,7 +83,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
     
     try {
       print('🔄 DoctorScreen: Full reload started...');
-      
       final savedYear = _localAcademicYear;
       
       await context.read<AuthCubit>().refreshUserData();
@@ -155,36 +146,24 @@ class _DoctorScreenState extends State<DoctorScreen> {
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
-    // ✅ Semester changed - Auto reload
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
       print('📢 WebSocket - Semester changed to: S$semester');
-      
-      setState(() {
-        _localSemester = semester;
-      });
-      
+      setState(() => _localSemester = semester);
       await _fullReload();
     });
 
-    // ✅ Academic year changed - Auto reload
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
       print('📢 WebSocket - Academic year changed to: $year');
-      
       setState(() {
         _pendingAcademicYear = year;
         _localAcademicYear = year;
       });
-      
       await _fullReload();
-      
-      setState(() {
-        _pendingAcademicYear = '';
-      });
+      setState(() => _pendingAcademicYear = '');
     });
 
-    // ✅ Session activated
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
       final session = data['session'] as Map<String, dynamic>?;
@@ -203,7 +182,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
-    // ✅ Session ended
     ws.sessionEndedStream.listen((data) {
       if (!mounted) return;
       final sessionId = data['sessionId'] as String? ?? 'Unknown';
@@ -221,7 +199,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
-    // ✅ Grade updated
     ws.gradeUpdateStream.listen((gradeData) {
       if (!mounted) return;
       final studentId = gradeData['student_id'] as int?;
@@ -242,7 +219,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
       }
     });
 
-    // ✅ Levels promoted
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
       print('📢 Levels promoted - Auto reloading...');
@@ -258,9 +234,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
       await _fullReload();
     });
 
-    // ✅ TA permissions changed — only react if it's about the current user.
-    // Updating AuthCubit.user.permissions causes every widget gated by
-    // `hasTAPermission(...)` to rebuild instantly.
     ws.taPermissionsStream.listen((data) {
       if (!mounted) return;
       final user = context.read<AuthCubit>().state.user;
@@ -284,14 +257,12 @@ class _DoctorScreenState extends State<DoctorScreen> {
             backgroundColor: const Color(0xFF8B5CF6),
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
     });
 
-    // ✅ General data change
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
@@ -341,75 +312,50 @@ class _DoctorScreenState extends State<DoctorScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        // Wrap the title in FittedBox so the year + semester pills scale
-        // down on narrow phones instead of overflowing the app bar.
         title: FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
           child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                borderRadius: BorderRadius.circular(8),
+                child: const Center(
+                  child: Icon(FontAwesomeIcons.chalkboardUser, color: Colors.white, size: 18),
+                ),
               ),
-              child: const Center(
-                child: Icon(Icons.medical_services_rounded, color: Colors.white, size: 18),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0EA5E9).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.timeline, size: 12, color: Color(0xFF0EA5E9)),
-                  const SizedBox(width: 4),
-                  Text(
-                    'S$_localSemester',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF0EA5E9),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
+                    const SizedBox(width: 4),
+                    Text(
+                      _localAcademicYear,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.purple,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.purple.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
-                  const SizedBox(width: 4),
-                  Text(
-                    _localAcademicYear,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.purple,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+            ],
+          ),
         ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
@@ -524,8 +470,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
           ),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
-            currentIndex:
-                _selectedIndex.clamp(0, _visibleTabs(doctor).length - 1),
+            currentIndex: _selectedIndex.clamp(0, _visibleTabs(doctor).length - 1),
             onTap: (index) {
               setState(() {
                 _selectedIndex = index;
@@ -533,8 +478,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
             },
             backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
             selectedItemColor: const Color(0xFF0EA5E9),
-            unselectedItemColor:
-                isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            unselectedItemColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             selectedLabelStyle: const TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 12,
@@ -583,18 +527,14 @@ class _DoctorScreenState extends State<DoctorScreen> {
             gradient: LinearGradient(
               colors: isDarkMode
                   ? [Colors.amber.shade300, Colors.orange.shade400]
-                  : [
-                      doctorPrimaryColor,
-                      doctorPrimaryColor.withValues(alpha: 0.7)
-                    ],
+                  : [doctorPrimaryColor, doctorPrimaryColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: (isDarkMode ? Colors.amber : doctorPrimaryColor)
-                    .withValues(alpha: 0.3),
+                color: (isDarkMode ? Colors.amber : doctorPrimaryColor).withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -662,17 +602,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
                       ),
                     ],
                   ),
-                  child: Center(
-                    child: Text(
-                      doctor.name.isNotEmpty
-                          ? doctor.name[0].toUpperCase()
-                          : 'D',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0EA5E9),
-                      ),
-                    ),
+                  child: const Center(
+                    child: Icon(FontAwesomeIcons.chalkboardUser, color: Color(0xFF0EA5E9), size: 36),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -706,8 +637,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
                 ],
                 const SizedBox(height: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -875,8 +805,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
             SizedBox(width: 12),
             Text(
               'Logout',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -889,8 +818,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor:
-                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             ),
             child: const Text('Cancel'),
           ),

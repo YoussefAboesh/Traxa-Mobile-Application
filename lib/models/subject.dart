@@ -10,6 +10,9 @@ class Subject {
   final String? department;
   final int? credits;
   final int? creditHours;
+  // ── TA fields (من نفس الـ subjects endpoint أو joined) ──────────────────
+  final int? taId;
+  final String? taName;
 
   Subject({
     required this.id,
@@ -22,13 +25,14 @@ class Subject {
     this.department,
     this.credits,
     this.creditHours,
+    this.taId,
+    this.taName,
   });
 
-  // دالة مساعدة للحصول على عدد الساعات (تجمع بين الحقلين)
   int get totalCreditHours {
     if (credits != null && credits! > 0) return credits!;
     if (creditHours != null && creditHours! > 0) return creditHours!;
-    return 3; // القيمة الافتراضية
+    return 3;
   }
 
   factory Subject.fromJson(Map<String, dynamic> json) {
@@ -36,13 +40,19 @@ class Subject {
       id: json['id'] ?? 0,
       code: json['code'],
       name: json['name'] ?? '',
-      doctorId: json['doctor_id'] ?? 0,
-      doctorName: json['doctor_name'] ?? 'Not Assigned',
+      doctorId: json['doctor_id'] ?? json['doctorId'] ?? 0,
+      doctorName: json['doctor_name'] ?? json['doctorName'] ?? 'Not Assigned',
       level: json['level'] ?? 1,
       semester: json['semester'] ?? 1,
       department: json['department'],
       credits: json['credits'],
-      creditHours: json['credit_hours'],
+      creditHours: json['credit_hours'] ?? json['creditHours'],
+      // اقبل أي شكل للـ key جاي من الـ backend
+      taId: json['ta_id'] ?? json['taId'] ?? json['teaching_assistant_id'],
+      taName: json['ta_name'] ??
+          json['taName'] ??
+          json['teaching_assistant_name'] ??
+          json['ta_username'],
     );
   }
 
@@ -58,6 +68,8 @@ class Subject {
       'department': department,
       'credits': credits,
       'credit_hours': creditHours,
+      'ta_id': taId,
+      'ta_name': taName,
     };
   }
 }

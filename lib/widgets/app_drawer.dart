@@ -49,7 +49,8 @@ class AppDrawer extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: [accentColor, accentColor.withValues(alpha: 0.8)],
               ),
-              borderRadius: const BorderRadius.only(topRight: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.only(topRight: Radius.circular(24)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -83,25 +84,32 @@ class AppDrawer extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text(
                   userName,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
                   username,
-                  style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.7)),
+                  style: TextStyle(
+                      fontSize: 13, color: Colors.white.withValues(alpha: 0.7)),
                 ),
                 if (email != null && email!.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     email!,
-                    style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5)),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.5)),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -122,7 +130,7 @@ class AppDrawer extends StatelessWidget {
               padding: EdgeInsets.zero,
               children: [
                 _DrawerItem(
-                  icon: Icons.person_rounded,
+                  icon: Icons.school_rounded,
                   title: 'Profile',
                   isDark: isDark,
                   onTap: () {
@@ -141,7 +149,8 @@ class AppDrawer extends StatelessWidget {
                       isScrollControlled: true,
                       backgroundColor: Colors.transparent,
                       shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(24)),
                       ),
                       builder: (_) => const SettingsBottomSheet(),
                     );
@@ -169,7 +178,9 @@ class AppDrawer extends StatelessWidget {
               'Traxa v2.0.0',
               style: TextStyle(
                 fontSize: 12,
-                color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade500,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.3)
+                    : Colors.grey.shade500,
               ),
             ),
           ),
@@ -200,13 +211,15 @@ class AppDrawer extends StatelessWidget {
         ),
         content: Text(
           'Are you sure you want to logout?',
-          style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+          style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+              foregroundColor:
+                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
             ),
             child: const Text('Cancel'),
           ),
@@ -218,7 +231,8 @@ class AppDrawer extends StatelessWidget {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             child: const Text('Logout'),
           ),
@@ -269,7 +283,9 @@ class _DrawerItem extends StatelessWidget {
           : Icon(
               Icons.chevron_right,
               size: 20,
-              color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade400,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.3)
+                  : Colors.grey.shade400,
             ),
       onTap: onTap,
     );

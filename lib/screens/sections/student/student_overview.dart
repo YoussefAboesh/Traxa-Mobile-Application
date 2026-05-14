@@ -1,11 +1,14 @@
 // lib/screens/sections/student/student_overview.dart
+// ignore_for_file: use_build_context_synchronously, unused_local_variable
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:traxa_mobile/models/subject.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
-import '../../../models/lecture.dart';
 import '../../../core/api_service.dart';
 import '../../../core/helpers.dart';
+import '../../../models/grade.dart';
 
 class StudentOverview extends StatefulWidget {
   const StudentOverview({super.key});
@@ -31,35 +34,113 @@ class _StudentOverviewState extends State<StudentOverview> {
     }
   }
 
+  /// حساب GPA التراكمي من أول مستوى 1 لحد مستوى وسيمستر معين
+  double _calculateCumulativeGPAUpTo(List<Grade> allVisibleGrades, List<Subject> allSubjects, int upToLevel, int upToSemester) {
+    List<Grade> cumulativeGrades = [];
+    
+    for (final grade in allVisibleGrades) {
+      final subject = allSubjects.firstWhere(
+        (s) => s.id == grade.subjectId,
+        orElse: () => Subject(id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
+      );
+      
+      if (subject.level < upToLevel) {
+        cumulativeGrades.add(grade);
+      } 
+      else if (subject.level == upToLevel) {
+        if (upToSemester == 2 && grade.semester <= 2) {
+          cumulativeGrades.add(grade);
+        } else if (upToSemester == 1 && grade.semester == 1) {
+          cumulativeGrades.add(grade);
+        }
+      }
+    }
+    
+    return calculateGPA(cumulativeGrades, allSubjects);
+  }
+
+  String _getTrendStatus(double currentGpa, double previousGpa) {
+    if (previousGpa == 0.0 || currentGpa == 0.0) {
+      return 'nodata';
+    }
+    if (currentGpa > previousGpa) {
+      return 'above';
+    } else if (currentGpa < previousGpa) {
+      return 'below';
+    } else {
+      return 'stable';
+    }
+  }
+
+  String _getTrendText(String status) {
+    switch (status) {
+      case 'above':
+        return 'Above';
+      case 'below':
+        return 'Below';
+      case 'stable':
+        return 'Stable';
+      default:
+        return 'No data';
+    }
+  }
+
+  IconData _getTrendIcon(String status) {
+    switch (status) {
+      case 'above':
+        return Icons.arrow_upward_rounded;
+      case 'below':
+        return Icons.arrow_downward_rounded;
+      default:
+        return Icons.remove_rounded;
+    }
+  }
+
+  Color _getTrendColor(String status) {
+    switch (status) {
+      case 'above':
+        return const Color(0xFF10B981);
+      case 'below':
+        return const Color(0xFFEF4444);
+      default:
+        return const Color(0xFF94A3B8);
+    }
+  }
+
   Future<void> _refreshData() async {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
-
     try {
       await context.read<DataCubit>().loadAllData();
-      // ignore: use_build_context_synchronously
       final authState = context.read<AuthCubit>().state;
       if (authState.user != null && authState.token != null) {
-        // ignore: use_build_context_synchronously
         await context.read<DataCubit>().loadStudentGradesWithToken(
-              authState.user!.id,
-              authState.token!,
-            );
+          authState.user!.id,
+          authState.token!,
+        );
       }
       await _loadCurrentSemester();
     } catch (e) {
       print('Error refreshing: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isRefreshing = false);
-      }
+      if (mounted) setState(() => _isRefreshing = false);
     }
+  }
+
+  String getGradeLabel(double gpa) {
+    if (gpa >= 3.7) return 'Excellent';
+    if (gpa >= 3.3) return 'Very Good';
+    if (gpa >= 2.7) return 'Good';
+    if (gpa >= 2.0) return 'Satisfactory';
+    if (gpa >= 1.7) return 'Pass';
+    return 'Needs Improvement';
   }
 
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = authState.user;
 
     final student = (user != null)
@@ -78,11 +159,11 @@ class _StudentOverviewState extends State<StudentOverview> {
 
     final currentLevel = student.level;
     final semester = _currentSemester ?? dataState.currentSemester;
-    final semesterDisplay = semester == 1 ? 'Semester 1' : 'Semester 2';
+    final semesterDisplay = semester == 1 ? 'First Semester' : 'Second Semester';
+    final academicYear = dataState.currentAcademicYear;
 
     final allSubjects = dataState.allSubjects;
     final allGrades = dataState.allGrades;
-
     final allVisibleGrades = allGrades
         .where((g) => g.studentId == student.id && g.isVisible)
         .toList();
@@ -94,15 +175,104 @@ class _StudentOverviewState extends State<StudentOverview> {
     final studentSubjects = dataState.getSubjectsForStudent(student);
     final studentLectures = dataState.getLecturesForStudent(student);
 
-    final semesterGPA = calculateGPA(currentSemesterGrades, allSubjects);
-    final cumulativeGPA = calculateGPA(allVisibleGrades, allSubjects);
-
     final todayName = getTodayDayName();
     final todaysLectures =
         studentLectures.where((l) => l.day == todayName).toList();
 
-    final recentGrades = List.of(currentSemesterGrades)
-      ..sort((a, b) => b.total.compareTo(a.total));
+    final now = DateTime.now();
+    final dayNames = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+    ];
+    final monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final formattedDate =
+        '${dayNames[now.weekday - 1]}, ${monthNames[now.month - 1]} ${now.day}, ${now.year}';
+
+    // ================= GPA CURRENT =================
+
+    final semesterGPA = calculateGPA(currentSemesterGrades, allSubjects);
+
+    int latestLevelWithGrades = 1;
+    int latestSemesterWithGrades = 1;
+    for (final grade in allVisibleGrades) {
+      if (
+          grade.level > latestLevelWithGrades ||
+          (grade.level == latestLevelWithGrades &&
+              grade.semester > latestSemesterWithGrades)) {
+        latestLevelWithGrades = grade.level;
+        latestSemesterWithGrades = grade.semester;
+      }
+    }
+
+    final currentCumulativeGPA = _calculateCumulativeGPAUpTo(
+      allVisibleGrades,
+      allSubjects,
+      latestLevelWithGrades,
+      latestSemesterWithGrades,
+    );
+
+    // ================= PREVIOUS GPA =================
+
+    int previousLevelForSemester = currentLevel;
+    int previousSemesterNumForSemester = 1;
+
+    if (semester == 1) {
+      previousSemesterNumForSemester = 2;
+      previousLevelForSemester = currentLevel - 1;
+      if (previousLevelForSemester <= 0) {
+        previousLevelForSemester = 1;
+        previousSemesterNumForSemester = 1;
+      }
+    } else {
+      previousSemesterNumForSemester = 1;
+    }
+
+    final previousSemesterGrades = allVisibleGrades.where((g) {
+      final subject = allSubjects.where((s) => s.id == g.subjectId).firstOrNull;
+      if (subject == null) return false;
+      return subject.level == previousLevelForSemester &&
+          g.semester == previousSemesterNumForSemester;
+    }).toList();
+
+    final previousSemesterGPA = calculateGPA(previousSemesterGrades, allSubjects);
+    final semesterTrendStatus = _getTrendStatus(semesterGPA, previousSemesterGPA);
+    final semesterLabel = getGradeLabel(semesterGPA);
+
+    // ================= CUMULATIVE PREVIOUS =================
+
+    int previousLevelForCumulative;
+    int previousSemesterForCumulative;
+
+    if (latestSemesterWithGrades == 2) {
+      previousLevelForCumulative = latestLevelWithGrades;
+      previousSemesterForCumulative = 1;
+    } else {
+      previousLevelForCumulative = latestLevelWithGrades - 1;
+      previousSemesterForCumulative = 2;
+      if (previousLevelForCumulative <= 0) {
+        previousLevelForCumulative = 1;
+        previousSemesterForCumulative = 1;
+      }
+    }
+
+    final previousCumulativeGPA = _calculateCumulativeGPAUpTo(
+      allVisibleGrades,
+      allSubjects,
+      previousLevelForCumulative,
+      previousSemesterForCumulative,
+    );
+
+    final cumulativeTrendStatus = _getTrendStatus(currentCumulativeGPA, previousCumulativeGPA);
+    final cumulativeLabel = getGradeLabel(currentCumulativeGPA);
+
+    final semesterCredits =
+        studentSubjects.fold<int>(0, (sum, s) => sum + (s.totalCreditHours));
+    final totalCredits = allVisibleGrades.fold<int>(0, (sum, g) {
+      final subject = allSubjects.where((s) => s.id == g.subjectId).firstOrNull;
+      return sum + (subject?.totalCreditHours ?? 0);
+    });
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -112,222 +282,382 @@ class _StudentOverviewState extends State<StudentOverview> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            SliverAppBar(
-              expandedHeight: 140,
-              floating: true,
-              pinned: true,
-              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              flexibleSpace: FlexibleSpaceBar(
-                title: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.bottomLeft,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .primaryColor
-                              .withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(Icons.school,
-                            color: Theme.of(context).primaryColor, size: 20),
-                      ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            student.name,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  fontSize: 15,
+            // Hero Header
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark
+                        ? [const Color(0xFF1E1B4B), const Color(0xFF312E81)]
+                        : [const Color(0xFF8B5CF6), const Color(0xFF6366F1)],
+                  ),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                // ✅ تغيير من Level لـ Semester
+                                'Welcome back, ${student.name.split(' ').first} 👋',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
-                            overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Track your academic performance at a glance',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.75),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                          Text(
-                            'Level $currentLevel • ${student.department} • $semesterDisplay',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(fontSize: 10),
-                          ),
-                        ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981)
+                                    .withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: const Color(0xFF10B981)
+                                        .withValues(alpha: 0.5)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.circle,
+                                      size: 7, color: Color(0xFF10B981)),
+                                  SizedBox(width: 4),
+                                  Text('Active',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF10B981),
+                                          fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.layers_rounded,
+                                      size: 12, color: Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    // ✅ تغيير من Level لـ Semester
+                                    'Semester $semester',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+            // GPA Cards Row
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildGpaCard(
+                        context,
+                        gpa: semesterGPA,
+                        label: semesterLabel,
+                        credits: semesterCredits,
+                        subjects: studentSubjects.length,
+                        trendStatus: semesterTrendStatus,
+                        color: const Color(0xFF8B5CF6),
+                        isDark: isDark,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildGpaCard(
+                        context,
+                        gpa: currentCumulativeGPA,
+                        label: cumulativeLabel,
+                        credits: totalCredits,
+                        subjects: allVisibleGrades.map((g) => g.subjectId).toSet().length,
+                        trendStatus: cumulativeTrendStatus,
+                        color: const Color(0xFF0EA5E9),
+                        isDark: isDark,
+                      ),
+                    ),
+                  ],
                 ),
-                centerTitle: false,
-                titlePadding:
-                    const EdgeInsets.only(left: 16, right: 16, bottom: 12),
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.0,
-                ),
-                delegate: SliverChildListDelegate([
-                  _buildBentoCard(
-                      'Total Subjects',
-                      '${studentSubjects.length}',
-                      Icons.book,
-                      [const Color(0xFF8B5CF6), const Color(0xFF6366F1)]),
-                  _buildBentoCard(
-                      'Total Lectures',
-                      '${studentLectures.length}',
-                      Icons.school,
-                      [const Color(0xFF0EA5E9), const Color(0xFF0284C7)]),
-                  _buildBentoCard(
-                      'Semester GPA',
-                      semesterGPA.toStringAsFixed(2),
-                      Icons.trending_up,
-                      [const Color(0xFF10B981), const Color(0xFF059669)],
-                      subtitle: semesterDisplay),
-                  _buildBentoCard(
-                      'Cumulative GPA',
-                      cumulativeGPA.toStringAsFixed(2),
-                      Icons.grade,
-                      [const Color(0xFFF59E0B), const Color(0xFFD97706)],
-                      subtitle: 'Overall'),
-                ]),
-              ),
-            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+            // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
+                  color: isDark
+                      ? const Color(0xFF1E293B)
+                      : const Color(0xFF0F172A),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Theme.of(context).dividerColor),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Row(
                         children: [
-                          Icon(Icons.calendar_today,
-                              color: Theme.of(context).primaryColor, size: 18),
-                          const SizedBox(width: 8),
-                          Text("Today's Schedule ($todayName)",
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8B5CF6)
+                                  .withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.calendar_today_rounded,
+                                color: Color(0xFF8B5CF6), size: 18),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Today\'s Schedule',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  formattedDate,
+                                  style: const TextStyle(
+                                    color: Color(0xFF64748B),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8B5CF6)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: const Color(0xFF8B5CF6)
+                                      .withValues(alpha: 0.3)),
+                            ),
+                            child: Text(
+                              todayName,
                               style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 15)),
-                          const Spacer(),
-                          Text('${todaysLectures.length}',
-                              style: TextStyle(
-                                  color: Theme.of(context).primaryColor,
-                                  fontWeight: FontWeight.bold)),
+                                  color: Color(0xFF8B5CF6),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          // ✅ شيلنا علامة الـ Refresh من هنا
                         ],
                       ),
                     ),
+                    const Divider(color: Colors.white12, height: 1),
                     if (todaysLectures.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Center(
-                            child: Text('No lectures today',
-                                style: TextStyle(color: Color(0xFF94A3B8)))),
-                      )
+                      _buildEmptySchedule()
                     else
-                      ...todaysLectures.map((l) => Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 4),
-                            child: _buildLectureItem(l, context),
+                      ...todaysLectures.map((lecture) => Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                            child: _buildScheduleItem(
+                              context,
+                              name: lecture.subjectName,
+                              time: lecture.timeDisplay,
+                              location: lecture.locationName,
+                              teacher: lecture.doctorName,
+                              type: 'Lec',
+                              typeColor: const Color(0xFF8B5CF6),
+                              isDark: isDark,
+                            ),
                           )),
                     const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
-            if (recentGrades.isNotEmpty)
-              SliverToBoxAdapter(
-                child: Container(
-                  margin: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Theme.of(context).dividerColor),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.all(14),
-                        child: Text('Recent Grades',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 15)),
-                      ),
-                      ...recentGrades.take(5).map((g) => Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 4),
-                            child: _buildGradeItem(g),
-                          )),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
-                ),
-              ),
-            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              fillOverscroll: true,
+              child: SizedBox.shrink(),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBentoCard(
-      String title, String value, IconData icon, List<Color> colors,
-      {String? subtitle}) {
+  // GPA Card Widget
+  Widget _buildGpaCard(
+    BuildContext context, {
+    required double gpa,
+    required String label,
+    required int credits,
+    required int subjects,
+    required String trendStatus,
+    required Color color,
+    required bool isDark,
+  }) {
+    final trendIcon = _getTrendIcon(trendStatus);
+    final trendText = _getTrendText(trendStatus);
+    final trendColor = _getTrendColor(trendStatus);
+    final showTrend = trendStatus != 'nodata';
+
     return Container(
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: colors),
+        color: isDark
+            ? color.withValues(alpha: 0.12)
+            : color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
-      padding: const EdgeInsets.all(10),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, color: Colors.white, size: 18),
+          Text(
+            gpa.toStringAsFixed(2),
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
-              Text(title,
+          const SizedBox(height: 4),
+          Text(
+            'GPA',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white70 : Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (showTrend)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(trendIcon, size: 14, color: trendColor),
+                const SizedBox(width: 4),
+                Text(
+                  trendText,
                   style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white.withValues(alpha: 0.9))),
-              if (subtitle != null)
-                Text(subtitle,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: trendColor,
+                  ),
+                ),
+              ],
+            )
+          else
+            const SizedBox(height: 20),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  Text(
+                    '$credits',
                     style: TextStyle(
-                        fontSize: 8,
-                        color: Colors.white.withValues(alpha: 0.6))),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    ),
+                  ),
+                  Text(
+                    'Credits',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? Colors.white54 : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+              Column(
+                children: [
+                  Text(
+                    '$subjects',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    ),
+                  ),
+                  Text(
+                    'Subjects',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? Colors.white54 : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ],
@@ -335,90 +665,126 @@ class _StudentOverviewState extends State<StudentOverview> {
     );
   }
 
-  Widget _buildLectureItem(Lecture lecture, BuildContext context) {
+  Widget _buildEmptySchedule() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 36),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(Icons.event_available_rounded,
+                size: 48, color: Color(0xFF334155)),
+            SizedBox(height: 12),
+            Text(
+              'No lectures or sections scheduled for today',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+            ),
+            SizedBox(height: 4),
+            Text('Enjoy your day off! 🎉',
+                style: TextStyle(color: Color(0xFF475569), fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScheduleItem(
+    BuildContext context, {
+    required String name,
+    required String time,
+    required String location,
+    required String teacher,
+    required String type,
+    required Color typeColor,
+    required bool isDark,
+  }) {
     return Container(
       padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
       child: Row(
         children: [
           Container(
-              width: 3,
-              height: 35,
-              decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor,
-                  borderRadius: BorderRadius.circular(2))),
+            width: 3,
+            height: 40,
+            decoration: BoxDecoration(
+              color: typeColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(lecture.subjectName,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time_rounded,
+                        size: 10, color: Color(0xFF94A3B8)),
+                    const SizedBox(width: 3),
+                    Text(time,
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF94A3B8))),
+                    const SizedBox(width: 10),
+                    const Icon(Icons.location_on_rounded,
+                        size: 10, color: Color(0xFF94A3B8)),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(location,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 10, color: Color(0xFF94A3B8))),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 2),
-                Row(children: [
-                  const Icon(Icons.access_time,
-                      size: 10, color: Color(0xFF94A3B8)),
-                  const SizedBox(width: 3),
-                  Text(lecture.timeDisplay,
-                      style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF94A3B8))),
-                  const SizedBox(width: 10),
-                  const Icon(Icons.location_on,
-                      size: 10, color: Color(0xFF94A3B8)),
-                  const SizedBox(width: 3),
-                  Text(lecture.locationName,
-                      style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF94A3B8))),
-                ]),
+                Row(
+                  children: [
+                    const Icon(Icons.school_rounded,
+                        size: 10, color: Color(0xFF64748B)),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        teacher,
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF64748B)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGradeItem(dynamic grade) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(grade.subjectName,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w500, fontSize: 13)),
-              Text(
-                  'Semester ${grade.semester} - ${grade.total.toInt()}/100 - ${grade.gradeLetter}',
-                  style:
-                      const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-            ]),
-          ),
           Container(
-            width: 40,
-            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
             decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [
-                grade.gradeColor,
-                grade.gradeColor.withValues(alpha: 0.7)
-              ]),
-              borderRadius: BorderRadius.circular(12),
+              color: typeColor.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Center(
-                child: Text('${grade.total.toInt()}%',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white))),
+            child: Text(
+              type,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: typeColor,
+              ),
+            ),
           ),
         ],
       ),

@@ -207,12 +207,6 @@ class _DoctorReportsState extends State<DoctorReports> {
               centerTitle: false,
               floating: true,
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _loadReports,
-                ),
-              ],
             ),
             if (_isLoading)
               const SliverFillRemaining(
@@ -276,8 +270,8 @@ class _DoctorReportsState extends State<DoctorReports> {
     // 🕒 Always read the real session boundaries:
     //   start = startTime/start_time (when activate was hit)
     //   end   = endTime/end_time/endedAt (when end-session was hit)
-    // createdAt is the *report save* timestamp on the server (≈ end), so it
-    // must NOT be used as the start.
+    // ⚠️ IMPORTANT: createdAt/created_at is the *report save* timestamp on the server
+    // and MUST NOT be used as end time — this was causing 1-hour delay issues.
     final startTime = report['startTime'] ??
         report['start_time'] ??
         report['startedAt'] ??
@@ -289,8 +283,9 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['createdAt'] ??
         report['created_at'] ??
         '';
+
     final dateField =
-        startTime.toString().isNotEmpty ? startTime : (report['date'] ?? endTime);
+        startTime.toString().isNotEmpty ? startTime : (report['date'] ?? '');
     final students = report['students'] as List? ?? [];
     final totalStudents =
         report['totalStudents'] ?? report['total_students'] ?? students.length;
@@ -298,10 +293,11 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['present_count'] ??
         students.where((s) => s['status'] == 'confirmed').length;
     final rate = totalStudents > 0 ? (presentCount / totalStudents * 100) : 0.0;
-
+ 
     final formattedDate = _fmtDate(dateField.toString());
     final formattedStart = _fmtTime12(startTime.toString());
-    final formattedEnd = _fmtTime12(endTime.toString());
+    final durationText =
+        _calculateDuration(startTime.toString(), endTime.toString());
     final presentText = '$presentCount/$totalStudents';
 
     final rateColor = rate >= 75
@@ -347,7 +343,8 @@ class _DoctorReportsState extends State<DoctorReports> {
                 ])),
             // ✅ Delete button
             IconButton(
-              onPressed: _isDeleting ? null : () => _deleteReport(report, index),
+              onPressed:
+                  _isDeleting ? null : () => _deleteReport(report, index),
               icon: Icon(
                 Icons.delete_outline,
                 color: Colors.red.shade400,
@@ -376,8 +373,8 @@ class _DoctorReportsState extends State<DoctorReports> {
           child: Row(children: [
             _miniStat(Icons.calendar_today, formattedDate, 'Date'),
             _miniStat(Icons.play_arrow, formattedStart, 'Start'),
-            _miniStat(Icons.stop, formattedEnd.isNotEmpty ? formattedEnd : '--',
-                'End'),
+            _miniStat(Icons.access_time,
+                durationText.isNotEmpty ? durationText : '--', 'Duration'),
             _miniStat(Icons.people, presentText, 'Present'),
           ]),
         ),
@@ -438,7 +435,8 @@ class _DoctorReportsState extends State<DoctorReports> {
                           vertical: 12, horizontal: 16),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
-                      side: BorderSide(color: Colors.red.withValues(alpha: 0.5)),
+                      side:
+                          BorderSide(color: Colors.red.withValues(alpha: 0.5)),
                     ),
                   ),
               ],
@@ -530,6 +528,12 @@ class _DoctorReportsState extends State<DoctorReports> {
                             fontSize: 12, color: Theme.of(context).hintColor)),
                     if (endTime.isNotEmpty)
                       Text('Ended: ${_fmtTime12(endTime)}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).hintColor)),
+                    if (startTime.isNotEmpty && endTime.isNotEmpty)
+                      Text(
+                          'Duration: ${_calculateDuration(startTime, endTime)}',
                           style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).hintColor)),
@@ -779,6 +783,38 @@ class _DoctorReportsState extends State<DoctorReports> {
       return '${dt.day} ${months[dt.month - 1]} ${dt.year} • $h:${dt.minute.toString().padLeft(2, '0')} $ampm';
     } catch (_) {
       return iso;
+    }
+  }
+
+  /// Calculate and format the duration between start and end times
+  /// Returns a human-readable duration string (e.g., "2h 30m" or "45m")
+  String _calculateDuration(String startIso, String endIso) {
+    if (startIso.isEmpty || endIso.isEmpty) {
+      return '';
+    }
+
+    try {
+      final startTime = DateTime.parse(startIso).toLocal();
+      final endTime = DateTime.parse(endIso).toLocal();
+
+      // Ensure end time is after start time
+      if (endTime.isBefore(startTime)) {
+        print('⚠️ Warning: End time is before start time');
+        return 'Error';
+      }
+
+      final duration = endTime.difference(startTime);
+      final hours = duration.inHours;
+      final minutes = duration.inMinutes.remainder(60);
+
+      if (hours > 0) {
+        return '${hours}h ${minutes}m';
+      } else {
+        return '${minutes}m';
+      }
+    } catch (e) {
+      print('❌ Error calculating duration: $e');
+      return '';
     }
   }
 }

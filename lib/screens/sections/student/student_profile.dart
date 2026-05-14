@@ -1,11 +1,12 @@
 // lib/screens/sections/student/student_profile.dart
-import 'dart:io';
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
@@ -37,8 +38,9 @@ class _StudentProfileState extends State<StudentProfile> {
   String? _qrCodeData;
   bool _isLoadingQR = false;
 
-  // Profile Image
-  String? _profileImagePath;
+  // Profile Image (من السيرفر)
+  String? _avatarUrl;
+  bool _isLoadingAvatar = false;
   final ImagePicker _imagePicker = ImagePicker();
 
   // Refresh
@@ -47,7 +49,7 @@ class _StudentProfileState extends State<StudentProfile> {
   @override
   void initState() {
     super.initState();
-    _loadSavedProfileImage();
+    _loadAvatar();
   }
 
   @override
@@ -64,6 +66,7 @@ class _StudentProfileState extends State<StudentProfile> {
 
     try {
       await context.read<DataCubit>().loadAllData();
+      await _loadAvatar();
     } catch (e) {
       print('Error refreshing profile: $e');
     } finally {
@@ -74,26 +77,42 @@ class _StudentProfileState extends State<StudentProfile> {
   }
 
   // ============================================
-  // Profile Image Methods
+  // Avatar Methods (Server-side with Cache)
   // ============================================
 
-  Future<void> _loadSavedProfileImage() async {
-    final prefs = await SharedPreferences.getInstance();
-    // ignore: use_build_context_synchronously
+  Future<void> _loadAvatar() async {
     final authState = context.read<AuthCubit>().state;
-    final key = 'profile_image_${authState.user?.id ?? 0}';
-    final savedPath = prefs.getString(key);
-    if (savedPath != null && File(savedPath).existsSync() && mounted) {
-      setState(() => _profileImagePath = savedPath);
+    if (authState.user == null) return;
+    
+    final studentId = authState.user!.username;
+    final token = authState.token;
+    
+    if (token == null) return;
+    
+    setState(() => _isLoadingAvatar = true);
+    
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        setState(() {
+          // ✅ إضافة timestamp عشان مايتكاشش، بس cached_network_image هيعتني بالـ cache
+          _avatarUrl = '${AppConstants.baseUrl}/api/student/avatar/$studentId';
+        });
+      } else if (response.statusCode == 404) {
+        setState(() => _avatarUrl = null);
+      }
+    } catch (e) {
+      print('Error loading avatar: $e');
+      setState(() => _avatarUrl = null);
+    } finally {
+      if (mounted) setState(() => _isLoadingAvatar = false);
     }
-  }
-
-  Future<void> _saveProfileImagePath(String path) async {
-    final prefs = await SharedPreferences.getInstance();
-    // ignore: use_build_context_synchronously
-    final authState = context.read<AuthCubit>().state;
-    final key = 'profile_image_${authState.user?.id ?? 0}';
-    await prefs.setString(key, path);
   }
 
   void _showImageOptions() {
@@ -130,7 +149,6 @@ class _StudentProfileState extends State<StudentProfile> {
               ),
               const SizedBox(height: 16),
 
-              // Take Photo
               _buildImageOptionTile(
                 icon: Icons.camera_alt_rounded,
                 label: 'Take Photo',
@@ -141,10 +159,9 @@ class _StudentProfileState extends State<StudentProfile> {
                 },
               ),
 
-              // Choose from Gallery
               _buildImageOptionTile(
                 icon: Icons.photo_library_rounded,
-                label: 'Choose Existing Photo',
+                label: 'Choose from Gallery',
                 color: const Color(0xFF8B5CF6),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -152,27 +169,14 @@ class _StudentProfileState extends State<StudentProfile> {
                 },
               ),
 
-              // View Photo (لو فيه صورة)
-              if (_profileImagePath != null)
-                _buildImageOptionTile(
-                  icon: Icons.zoom_in_rounded,
-                  label: 'View Photo',
-                  color: const Color(0xFF10B981),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _viewPhoto();
-                  },
-                ),
-
-              // Remove Photo (لو فيه صورة)
-              if (_profileImagePath != null)
+              if (_avatarUrl != null)
                 _buildImageOptionTile(
                   icon: Icons.delete_rounded,
                   label: 'Remove Photo',
                   color: Colors.redAccent,
                   onTap: () {
                     Navigator.pop(ctx);
-                    _removePhoto();
+                    _removeAvatar();
                   },
                 ),
 
@@ -213,6 +217,15 @@ class _StudentProfileState extends State<StudentProfile> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    final authState = context.read<AuthCubit>().state;
+    if (authState.user == null || authState.token == null) {
+      ToastMessage.showError(context, 'Not authenticated');
+      return;
+    }
+    
+    final studentId = authState.user!.username;
+    final token = authState.token!;
+    
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: source,
@@ -221,40 +234,66 @@ class _StudentProfileState extends State<StudentProfile> {
         imageQuality: 85,
       );
 
-      if (pickedFile != null && mounted) {
-        setState(() => _profileImagePath = pickedFile.path);
-        await _saveProfileImagePath(pickedFile.path);
-        if (mounted) {
+      if (pickedFile == null) return;
+      
+      ToastMessage.showInfo(context, 'Uploading...');
+      
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
+      );
+      
+      request.headers['Authorization'] = 'Bearer $token';
+      request.files.add(await http.MultipartFile.fromPath('avatar', pickedFile.path));
+      
+      final response = await request.send();
+      
+      if (response.statusCode == 200) {
+        final responseData = await response.stream.bytesToString();
+        final data = jsonDecode(responseData);
+        
+        if (data['success'] == true) {
           ToastMessage.showSuccess(context, 'Profile photo updated!');
+          await _loadAvatar();
+        } else {
+          ToastMessage.showError(context, data['error'] ?? 'Upload failed');
         }
+      } else {
+        ToastMessage.showError(context, 'Upload failed: ${response.statusCode}');
       }
     } catch (e) {
-      if (mounted) {
-        ToastMessage.showError(
-            context, 'Failed to pick image: ${e.toString()}');
-      }
+      ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
 
-  void _viewPhoto() {
-    if (_profileImagePath == null) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _FullScreenPhotoViewer(imagePath: _profileImagePath!),
-      ),
-    );
-  }
-
-  Future<void> _removePhoto() async {
-    final prefs = await SharedPreferences.getInstance();
-    // ignore: use_build_context_synchronously
+  Future<void> _removeAvatar() async {
     final authState = context.read<AuthCubit>().state;
-    final key = 'profile_image_${authState.user?.id ?? 0}';
-    await prefs.remove(key);
-    if (mounted) {
-      setState(() => _profileImagePath = null);
-      ToastMessage.showInfo(context, 'Profile photo removed');
+    if (authState.user == null || authState.token == null) {
+      ToastMessage.showError(context, 'Not authenticated');
+      return;
+    }
+    
+    final studentId = authState.user!.username;
+    final token = authState.token!;
+    
+    try {
+      final response = await http.delete(
+        Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+      
+      final data = jsonDecode(response.body);
+      
+      if (response.statusCode == 200 && data['success'] == true) {
+        ToastMessage.showSuccess(context, 'Photo removed');
+        setState(() => _avatarUrl = null);
+      } else {
+        ToastMessage.showError(context, data['error'] ?? 'Failed to remove');
+      }
+    } catch (e) {
+      ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
 
@@ -280,11 +319,7 @@ class _StudentProfileState extends State<StudentProfile> {
 
       if (response['success'] == true && response['qrCode'] != null) {
         final qrCode = response['qrCode'];
-
-        final encodedData = qrCode['encoded'] ?? '';
-        final rawData = qrCode['raw'] ?? '';
-
-        final qrData = encodedData.isNotEmpty ? encodedData : rawData;
+        final qrData = qrCode['encoded'] ?? qrCode['raw'] ?? '';
 
         if (qrData.isNotEmpty) {
           setState(() {
@@ -472,23 +507,40 @@ class _StudentProfileState extends State<StudentProfile> {
                               width: 100,
                               height: 100,
                               decoration: BoxDecoration(
-                                gradient: _profileImagePath == null
-                                    ? LinearGradient(colors: [
-                                        Theme.of(context).primaryColor,
-                                        const Color(0xFF6366F1)
-                                      ])
-                                    : null,
                                 shape: BoxShape.circle,
-                                image: _profileImagePath != null
-                                    ? DecorationImage(
-                                        image:
-                                            FileImage(File(_profileImagePath!)),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null,
+                                color: Colors.grey.shade300,
                               ),
-                              child: _profileImagePath == null
-                                  ? Center(
+                              child: _avatarUrl != null && !_isLoadingAvatar
+                                  ? ClipOval(
+                                      child: CachedNetworkImage(
+                                        imageUrl: _avatarUrl!,
+                                        fit: BoxFit.cover,
+                                        width: 100,
+                                        height: 100,
+                                        placeholder: (context, url) => Center(
+                                          child: SizedBox(
+                                            width: 30,
+                                            height: 30,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Theme.of(context).primaryColor,
+                                            ),
+                                          ),
+                                        ),
+                                        errorWidget: (context, url, error) => Center(
+                                          child: Text(
+                                            (student?.name.isNotEmpty ?? false)
+                                                ? student!.name[0].toUpperCase()
+                                                : 'S',
+                                            style: const TextStyle(
+                                                fontSize: 40,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Center(
                                       child: Text(
                                         (student?.name.isNotEmpty ?? false)
                                             ? student!.name[0].toUpperCase()
@@ -498,8 +550,7 @@ class _StudentProfileState extends State<StudentProfile> {
                                             fontWeight: FontWeight.bold,
                                             color: Colors.white),
                                       ),
-                                    )
-                                  : null,
+                                    ),
                             ),
                             Container(
                               padding: const EdgeInsets.all(6),
@@ -765,46 +816,6 @@ class _StudentProfileState extends State<StudentProfile> {
           icon:
               Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20),
           onPressed: () => onToggle(!obscure),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================
-// Full Screen Photo Viewer
-// ============================================
-class _FullScreenPhotoViewer extends StatelessWidget {
-  final String imagePath;
-  const _FullScreenPhotoViewer({required this.imagePath});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white, size: 28),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title:
-            const Text('Profile Photo', style: TextStyle(color: Colors.white)),
-      ),
-      body: Center(
-        child: InteractiveViewer(
-          minScale: 0.5,
-          maxScale: 4.0,
-          child: Hero(
-            tag: 'profile_photo',
-            child: Image.file(
-              File(imagePath),
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
-                  color: Colors.white54, size: 80),
-            ),
-          ),
         ),
       ),
     );

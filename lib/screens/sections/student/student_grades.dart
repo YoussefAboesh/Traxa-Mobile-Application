@@ -16,8 +16,7 @@ class StudentGrades extends StatefulWidget {
 }
 
 class _StudentGradesState extends State<StudentGrades> {
-  int _selectedSemester =
-      0; // 0 = All Semesters, 1 = Semester 1, 2 = Semester 2
+  int _selectedSemester = 0; // 0 = All Semesters, 1 = Semester 1, 2 = Semester 2
   int _selectedLevel = 0;
   final List<int> _levels = [1, 2, 3, 4];
   final Map<String, Map<String, double>> _distributionsCache = {};
@@ -54,6 +53,38 @@ class _StudentGradesState extends State<StudentGrades> {
     }
   }
 
+  double calculateCumulativeGPAForFilter(
+      List<Grade> allVisibleGrades, List<Subject> allSubjects, int selectedLevel, int selectedSemester) {
+    
+    if (selectedLevel == 0) {
+      return calculateGPA(allVisibleGrades, allSubjects);
+    }
+    
+    List<Grade> cumulativeGrades = [];
+    
+    for (final grade in allVisibleGrades) {
+      final subject = allSubjects.firstWhere(
+        (s) => s.id == grade.subjectId,
+        orElse: () => Subject(id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
+      );
+      
+      if (subject.level < selectedLevel) {
+        cumulativeGrades.add(grade);
+      } 
+      else if (subject.level == selectedLevel) {
+        if (selectedSemester == 0) {
+          cumulativeGrades.add(grade);
+        } else if (selectedSemester == 1 && grade.semester == 1) {
+          cumulativeGrades.add(grade);
+        } else if (selectedSemester == 2 && grade.semester <= 2) {
+          cumulativeGrades.add(grade);
+        }
+      }
+    }
+    
+    return calculateGPA(cumulativeGrades, allSubjects);
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
@@ -74,35 +105,30 @@ class _StudentGradesState extends State<StudentGrades> {
     }
 
     final allSubjects = dataState.allSubjects;
-    final allGrades = dataState.allGrades; // ✅ All grades from all semesters
+    final allGrades = dataState.allGrades;
 
-    // ✅ Get visible grades for this student only
-    final studentGrades =
-        allGrades.where((g) => g.studentId == student.id && g.isVisible).toList();
+    final allVisibleGrades = allGrades
+        .where((g) => g.studentId == student.id && g.isVisible)
+        .toList();
 
-    // ✅ Filter by selected semester (if not "All")
-    List<Grade> filteredGrades = List.from(studentGrades);
+    List<Grade> filteredGrades = List.from(allVisibleGrades);
     if (_selectedSemester == 1) {
       filteredGrades = filteredGrades.where((g) => g.semester == 1).toList();
     } else if (_selectedSemester == 2) {
       filteredGrades = filteredGrades.where((g) => g.semester == 2).toList();
     }
-
-    // Filter by level
     if (_selectedLevel != 0) {
-      filteredGrades =
-          filteredGrades.where((g) => g.level == _selectedLevel).toList();
+      filteredGrades = filteredGrades.where((g) => g.level == _selectedLevel).toList();
     }
-
     filteredGrades.sort((a, b) => a.subjectName.compareTo(b.subjectName));
 
-    // Stats based on filtered grades
+    final semesterGPA = calculateGPA(filteredGrades, allSubjects);
+    final cumulativeGPA = calculateCumulativeGPAForFilter(
+        allVisibleGrades, allSubjects, _selectedLevel, _selectedSemester);
+
     final totalCredits = calculateEarnedCredits(filteredGrades, allSubjects);
     final subjectsPassed = filteredGrades.where((g) => g.total >= 50).length;
-    final subjectsFailed =
-        filteredGrades.where((g) => g.total < 50 && g.total > 0).length;
-    final semesterGPA = calculateGPA(filteredGrades, allSubjects);
-    final cumulativeGPA = calculateGPA(studentGrades, allSubjects);
+    final subjectsFailed = filteredGrades.where((g) => g.total < 50 && g.total > 0).length;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -119,7 +145,6 @@ class _StudentGradesState extends State<StudentGrades> {
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             ),
 
-            // Stats Cards
             SliverPadding(
               padding: const EdgeInsets.all(16),
               sliver: SliverGrid(
@@ -132,10 +157,15 @@ class _StudentGradesState extends State<StudentGrades> {
                 delegate: SliverChildListDelegate([
                   _buildStatCard(
                     title: 'GPA',
-                    value:
-                        '${getSemesterLabel()}: ${semesterGPA.toStringAsFixed(2)}\nC: ${cumulativeGPA.toStringAsFixed(2)}',
+                    value: '${getSemesterLabel()}: ${semesterGPA.toStringAsFixed(2)}',
                     icon: Icons.trending_up,
                     color: const Color(0xFF8B5CF6),
+                  ),
+                  _buildStatCard(
+                    title: 'Cumulative',
+                    value: cumulativeGPA.toStringAsFixed(2),
+                    icon: Icons.grade,
+                    color: const Color(0xFF0EA5E9),
                   ),
                   _buildStatCard(
                       title: 'Total Credits',
@@ -143,20 +173,14 @@ class _StudentGradesState extends State<StudentGrades> {
                       icon: Icons.credit_card,
                       color: const Color(0xFF10B981)),
                   _buildStatCard(
-                      title: 'Subjects Passed',
-                      value: subjectsPassed.toString(),
-                      icon: Icons.check_circle,
-                      color: const Color(0xFF34D399)),
-                  _buildStatCard(
-                      title: 'Subjects Failed',
-                      value: subjectsFailed.toString(),
-                      icon: Icons.cancel,
-                      color: const Color(0xFFF87171)),
+                      title: 'Subjects',
+                      value: 'P: $subjectsPassed / F: $subjectsFailed',
+                      icon: Icons.book,
+                      color: const Color(0xFFF59E0B)),
                 ]),
               ),
             ),
 
-            // Filters Row
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -171,7 +195,6 @@ class _StudentGradesState extends State<StudentGrades> {
                 ),
                 child: Row(
                   children: [
-                    // Semester Filter (Student can choose any semester)
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -213,7 +236,6 @@ class _StudentGradesState extends State<StudentGrades> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Level Filter
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -259,7 +281,6 @@ class _StudentGradesState extends State<StudentGrades> {
 
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-            // Grades List
             if (filteredGrades.isEmpty)
               SliverFillRemaining(
                 child: Center(
@@ -283,8 +304,7 @@ class _StudentGradesState extends State<StudentGrades> {
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     child: _buildGradeCard(filteredGrades[index], allSubjects),
                   ),
                   childCount: filteredGrades.length,
@@ -319,22 +339,20 @@ class _StudentGradesState extends State<StudentGrades> {
         children: [
           Icon(icon, size: 20, color: Colors.white70),
           const SizedBox(height: 6),
-          // Scale the multi-line GPA string down on narrow screens instead
-          // of overflowing the card.
           Flexible(
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(value,
                   style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ),
           ),
           const SizedBox(height: 2),
           Text(title,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Colors.white70)),
         ],
@@ -358,66 +376,118 @@ class _StudentGradesState extends State<StudentGrades> {
         onTap: () => _showGradeDetails(grade, subject, subjects),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    grade.gradeColor,
-                    grade.gradeColor.withValues(alpha: 0.7)
-                  ]),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Center(
-                  child: Text(grade.gradeLetter,
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(grade.subjectName,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${subject?.code ?? 'N/A'} • ${subject?.doctorName ?? 'N/A'} • Semester ${grade.semester}',
-                      style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).hintColor),
-                    ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              Row(
                 children: [
-                  Text('${grade.total.toInt()}/100',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: grade.gradeColor)),
-                  const SizedBox(height: 4),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    width: 50,
+                    height: 50,
                     decoration: BoxDecoration(
-                      color: isPassed
-                          ? Colors.green.withValues(alpha: 0.1)
-                          : Colors.red.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      gradient: LinearGradient(colors: [
+                        grade.gradeColor,
+                        grade.gradeColor.withValues(alpha: 0.7)
+                      ]),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Text(isPassed ? 'Pass' : 'Fail',
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: isPassed ? Colors.green : Colors.red,
-                            fontWeight: FontWeight.w600)),
+                    child: Center(
+                      child: Text(grade.gradeLetter,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(grade.subjectName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        const SizedBox(height: 4),
+                        // ✅ السيميستر تحت و wrap text
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                subject?.code ?? 'N/A',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(context).primaryColor,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                subject?.doctorName ?? 'N/A',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF10B981),
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Semester ${grade.semester}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFFF59E0B),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('${grade.total.toInt()}/100',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: grade.gradeColor)),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isPassed
+                              ? Colors.green.withValues(alpha: 0.1)
+                              : Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(isPassed ? 'Pass' : 'Fail',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: isPassed ? Colors.green : Colors.red,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
                   ),
                 ],
               ),

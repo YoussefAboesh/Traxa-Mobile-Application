@@ -1,8 +1,10 @@
 // lib/screens/student_screen.dart
-// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: invalid_null_aware_operator, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:collection/collection.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../cubit/theme/theme_cubit.dart';
@@ -23,11 +25,11 @@ class StudentScreen extends StatefulWidget {
 class _StudentScreenState extends State<StudentScreen> {
   int _selectedIndex = 0;
   bool _isReloading = false;
-  
+
   // Local variables for immediate UI update
   String _localAcademicYear = '2026-2027';
   int _localSemester = 1;
-  
+
   // Store the new year from WebSocket
   String _pendingAcademicYear = '';
 
@@ -52,7 +54,7 @@ class _StudentScreenState extends State<StudentScreen> {
       label: 'Grades',
     ),
     const BottomNavigationBarItem(
-      icon: Icon(Icons.person_rounded),
+      icon: FaIcon(FontAwesomeIcons.userGraduate),
       label: 'Profile',
     ),
   ];
@@ -98,15 +100,15 @@ class _StudentScreenState extends State<StudentScreen> {
   Future<void> _fullReload() async {
     if (_isReloading) return;
     setState(() => _isReloading = true);
-    
+
     try {
       print('🔄 StudentScreen: Full reload started...');
-      
+
       final savedYear = _localAcademicYear;
-      
+
       await context.read<AuthCubit>().refreshUserData();
       await context.read<DataCubit>().fullReload();
-      
+
       final authState = context.read<AuthCubit>().state;
       if (authState.user != null && authState.token != null) {
         await context.read<DataCubit>().loadStudentGradesWithToken(
@@ -114,7 +116,7 @@ class _StudentScreenState extends State<StudentScreen> {
               authState.token!,
             );
       }
-      
+
       final dataState = context.read<DataCubit>().state;
       setState(() {
         if (_pendingAcademicYear.isNotEmpty) {
@@ -124,9 +126,10 @@ class _StudentScreenState extends State<StudentScreen> {
         }
         _localSemester = dataState.currentSemester;
       });
-      
-      print('✅ StudentScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
-      
+
+      print(
+          '✅ StudentScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -140,7 +143,8 @@ class _StudentScreenState extends State<StudentScreen> {
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -159,7 +163,8 @@ class _StudentScreenState extends State<StudentScreen> {
             backgroundColor: Colors.red,
             duration: Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -173,36 +178,33 @@ class _StudentScreenState extends State<StudentScreen> {
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
-    // ✅ Semester changed - Auto reload
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
       print('📢 WebSocket - Semester changed to: S$semester');
-      
+
       setState(() {
         _localSemester = semester;
       });
-      
+
       await _fullReload();
     });
 
-    // ✅ Academic year changed - Auto reload
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
       print('📢 WebSocket - Academic year changed to: $year');
-      
+
       setState(() {
         _pendingAcademicYear = year;
         _localAcademicYear = year;
       });
-      
+
       await _fullReload();
-      
+
       setState(() {
         _pendingAcademicYear = '';
       });
     });
 
-    // ✅ Grade updated or hidden
     ws.gradeUpdateStream.listen((gradeData) {
       if (!mounted) return;
       final authState = context.read<AuthCubit>().state;
@@ -211,7 +213,6 @@ class _StudentScreenState extends State<StudentScreen> {
       final rawId = gradeData['student_id'] ?? gradeData['studentId'];
       final studentId = int.tryParse(rawId?.toString() ?? '');
 
-      // reload if it's this student's grade, or if we can't identify the student
       if (studentId == null || studentId == authState.user!.id) {
         final isVisible = gradeData['isVisible'] ?? gradeData['is_visible'];
         if (isVisible != false && studentId == authState.user!.id) {
@@ -221,7 +222,8 @@ class _StudentScreenState extends State<StudentScreen> {
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 2),
               behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           );
         }
@@ -232,7 +234,6 @@ class _StudentScreenState extends State<StudentScreen> {
       }
     });
 
-    // ✅ Registration approved
     ws.registrationApprovedStream.listen((subjects) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -241,13 +242,13 @@ class _StudentScreenState extends State<StudentScreen> {
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       context.read<DataCubit>().loadAllData();
     });
 
-    // ✅ Levels promoted
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
       print('📢 Levels promoted - Auto reloading...');
@@ -257,13 +258,13 @@ class _StudentScreenState extends State<StudentScreen> {
           backgroundColor: Colors.blue,
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       await _fullReload();
     });
 
-    // ✅ General data change
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
@@ -276,7 +277,6 @@ class _StudentScreenState extends State<StudentScreen> {
           final authState = context.read<AuthCubit>().state;
           if (authState.user != null && authState.token != null) {
             final gradeData = data['data'] as Map<String, dynamic>?;
-            // check student_id flexibly (int or string from server)
             final rawId = gradeData?['student_id'] ?? gradeData?['studentId'];
             final studentId = int.tryParse(rawId?.toString() ?? '');
             if (studentId == null || studentId == authState.user!.id) {
@@ -302,10 +302,10 @@ class _StudentScreenState extends State<StudentScreen> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final themeCubit = context.watch<ThemeCubit>();
-    final student = authState.user;
+    final user = authState.user;
     final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
 
-    if (student == null) {
+    if (user == null) {
       return const Scaffold(
         body: Center(child: Text('User not found')),
       );
@@ -327,35 +327,10 @@ class _StudentScreenState extends State<StudentScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Center(
-                child: Icon(Icons.school_rounded, color: Colors.white, size: 18),
+                child: FaIcon(FontAwesomeIcons.userGraduate, color: Colors.white, size: 18),
               ),
             ),
             const SizedBox(width: 8),
-            // Semester Badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.timeline, size: 12, color: Color(0xFF8B5CF6)),
-                  const SizedBox(width: 4),
-                  Text(
-                    'S$_localSemester',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF8B5CF6),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            // Academic Year Badge
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -455,7 +430,7 @@ class _StudentScreenState extends State<StudentScreen> {
           ),
         ],
       ),
-      drawer: _buildDrawer(context, student),
+      drawer: _buildDrawer(context, user),
       body: _sections[_selectedIndex],
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -557,8 +532,19 @@ class _StudentScreenState extends State<StudentScreen> {
     }
   }
 
-  Widget _buildDrawer(BuildContext context, dynamic student) {
+  Widget _buildDrawer(BuildContext context, dynamic user) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dataState = context.read<DataCubit>().state;
+    
+    // ✅ استخدام firstWhereOrNull بدلاً من firstWith orElse
+    final student = dataState.students.firstWhereOrNull(
+      (s) => s.id == user.id,
+    );
+    
+    String department = student?.department ?? 'General';
+    int level = student?.level ?? 1;
+    String studentName = student?.name ?? user.name;
+    String studentId = student?.studentId ?? user.username;
 
     return Drawer(
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
@@ -601,22 +587,13 @@ class _StudentScreenState extends State<StudentScreen> {
                       ),
                     ],
                   ),
-                  child: Center(
-                    child: Text(
-                      student.name.isNotEmpty
-                          ? student.name[0].toUpperCase()
-                          : 'S',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF8B5CF6),
-                      ),
-                    ),
+                  child: const Center(
+                    child: FaIcon(FontAwesomeIcons.userGraduate, color: Color(0xFF8B5CF6), size: 36),
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  student.name,
+                  studentName,
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -626,7 +603,7 @@ class _StudentScreenState extends State<StudentScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  student.username,
+                  studentId,
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.white.withValues(alpha: 0.7),
@@ -634,8 +611,7 @@ class _StudentScreenState extends State<StudentScreen> {
                 ),
                 const SizedBox(height: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
@@ -643,18 +619,15 @@ class _StudentScreenState extends State<StudentScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.badge,
-                        size: 12,
-                        color: Colors.white,
-                      ),
+                      const Icon(Icons.badge, size: 12, color: Colors.white),
                       const SizedBox(width: 4),
-                      const Text(
-                        'Student',
-                        style: TextStyle(
-                          fontSize: 11,
+                      Text(
+                        'Student • Level $level • $department',
+                        style: const TextStyle(
+                          fontSize: 10,
                           color: Colors.white,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),

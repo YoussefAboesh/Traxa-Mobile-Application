@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/secure_storage_service.dart';
 import 'constants.dart';
 
 class ApiService {
@@ -10,19 +11,18 @@ class ApiService {
 
   // ================= TOKEN MANAGEMENT =================
 
-  // تهيئة التوكن من SharedPreferences عند بدء التشغيل
+  // Initialize token from secure storage at app startup
   static Future<void> initToken() async {
     if (_isInitialized) return;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _token = prefs.getString(AppConstants.tokenKey);
+      _token = await SecureStorageService.getToken();
 
       if (_token != null) {
         print(
-            '🔑 Token loaded from SharedPreferences: ${_token!.substring(0, 20)}...');
+            '🔐 Token loaded from secure storage (encrypted): ${_token!.substring(0, 20)}...');
       } else {
-        print('🔑 No token found in SharedPreferences');
+        print('🔐 No token found in secure storage');
       }
 
       _isInitialized = true;
@@ -32,34 +32,31 @@ class ApiService {
     }
   }
 
-  // حفظ التوكن في SharedPreferences
+  // Save token to secure storage (encrypted)
   static Future<void> setToken(String? token) async {
     _token = token;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
       if (token != null && token.isNotEmpty) {
-        await prefs.setString(AppConstants.tokenKey, token);
+        await SecureStorageService.saveToken(token);
         print(
-            '🔑 Token saved to SharedPreferences: ${token.substring(0, 20)}...');
+            '🔐 Token saved to secure storage (encrypted): ${token.substring(0, 20)}...');
       } else {
-        await prefs.remove(AppConstants.tokenKey);
-        print('🔑 Token removed from SharedPreferences');
+        await SecureStorageService.deleteToken();
+        print('🔐 Token removed from secure storage');
       }
     } catch (e) {
       print('❌ Error saving token: $e');
     }
   }
 
-  // حذف التوكن (عند تسجيل الخروج)
+  // Delete token (logout)
   static Future<void> clearToken() async {
     _token = null;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(AppConstants.tokenKey);
-      print('🔑 Token cleared from SharedPreferences');
+      await SecureStorageService.deleteToken();
+      print('🔐 Token cleared from secure storage');
     } catch (e) {
       print('❌ Error clearing token: $e');
     }
@@ -332,8 +329,11 @@ class ApiService {
       );
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
-        final yr = d['academicYear'] ?? d['academic_year'] ??
-            d['year'] ?? d['current_academic_year'] ?? d['currentAcademicYear'];
+        final yr = d['academicYear'] ??
+            d['academic_year'] ??
+            d['year'] ??
+            d['current_academic_year'] ??
+            d['currentAcademicYear'];
         if (yr != null && yr.toString().contains('-')) {
           await persistAcademicYear(yr.toString());
           return yr.toString();
@@ -349,8 +349,10 @@ class ApiService {
       );
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
-        final yr = d['current_academic_year'] ?? d['academicYear'] ??
-            d['academic_year'] ?? d['year'];
+        final yr = d['current_academic_year'] ??
+            d['academicYear'] ??
+            d['academic_year'] ??
+            d['year'];
         if (yr != null && yr.toString().contains('-')) {
           await persistAcademicYear(yr.toString());
           return yr.toString();

@@ -1,6 +1,7 @@
 // lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/auth/auth_state.dart';
 import '../cubit/data/data_cubit.dart';
@@ -62,17 +63,14 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // ✅ معالجة النجاح - REFRESH تلقائي بعد Login
         if (state.isAuthenticated && state.user != null) {
           final dataCubit = context.read<DataCubit>();
           final userName = state.user?.name ?? "User";
 
           print('✅ Login successful, loading fresh data...');
           
-          // ✅ 1. جلب جميع البيانات الأساسية (أحدث إصدار)
           await dataCubit.fullReload();
           
-          // ✅ 2. جلب الدرجات للطالب
           if (!state.user!.isDoctor && state.user != null && state.token != null) {
             final studentId = state.user!.id;
             final token = state.token!;
@@ -80,12 +78,8 @@ class _LoginScreenState extends State<LoginScreen> {
             await dataCubit.checkGradesStatus(studentId, token);
           }
           
-          // ✅ 3. تحديث الـ UI بعد تحميل البيانات
           if (context.mounted) {
             ErrorHandler.showSuccessSnackBar(context, 'Welcome $userName!');
-            
-            // ✅ 4. التنقل إلى الصفحة الرئيسية بعد تحميل البيانات
-            // (الـ MaterialApp هيتعامل مع الـ navigation تلقائياً)
           }
         }
       },
@@ -142,7 +136,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         child: Icon(
-                          _isStudentLogin ? Icons.school_rounded : Icons.medical_services_rounded,
+                          _isStudentLogin 
+                              ? Icons.school_rounded
+                              : FontAwesomeIcons.chalkboardUser,
                           size: 48,
                           color: Colors.white,
                         ),
@@ -200,7 +196,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           _buildToggleButton(
                             isActive: !_isStudentLogin,
                             label: 'Doctor / TA',
-                            icon: Icons.medical_services_rounded,
+                            icon: FontAwesomeIcons.chalkboardUser,
                             onTap: () => setState(() => _isStudentLogin = false),
                           ),
                         ],

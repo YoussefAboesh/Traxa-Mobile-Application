@@ -167,3 +167,13 @@ int countFailedSubjects(List<Grade> grades) {
 double roundToTwoDecimals(double value) {
   return double.parse(value.toStringAsFixed(2));
 }
+
+/// ✅ الحصول على تقييم الدرجات بناءً على المعدل
+String getGradeLabel(double gpa) {
+  if (gpa >= 3.7) return 'Excellent';
+  if (gpa >= 3.3) return 'Very Good';
+  if (gpa >= 2.7) return 'Good';
+  if (gpa >= 2.0) return 'Satisfactory';
+  if (gpa >= 1.7) return 'Pass';
+  return 'Needs Improvement';
+}

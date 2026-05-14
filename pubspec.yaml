@@ -12,6 +12,9 @@ dependencies:
   cupertino_icons: ^1.0.6
   http: ^1.1.0
   shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.0.0
+  font_awesome_flutter: ^10.7.0
+  cached_network_image: ^3.3.1
   image_picker: ^1.0.7
   flutter_bloc: ^8.1.3
   pdf: ^3.10.8
@@ -22,6 +25,7 @@ dependencies:
   equatable: ^2.0.5
   qr_flutter: ^4.1.0
   web_socket_channel: ^2.4.0
+  collection: ^1.19.1
 
 
 dev_dependencies:
