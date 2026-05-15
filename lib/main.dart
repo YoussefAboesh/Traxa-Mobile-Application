@@ -56,9 +56,6 @@ class MyApp extends StatelessWidget {
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             home: BlocConsumer<AuthCubit, AuthState>(
-              // Whenever a session is restored or login succeeds, force a
-              // full data reload so the user lands on a populated screen
-              // instead of having to hit refresh manually.
               listenWhen: (prev, curr) =>
                   curr.isAuthenticated &&
                   curr.user != null &&
@@ -92,7 +89,6 @@ class MyApp extends StatelessWidget {
                         );
                       }
 
-                      // TAs share the doctor portal but with filtered nav.
                       if (authState.user!.isDoctor ||
                           authState.user!.isTeachingAssistant) {
                         return const DoctorScreen();

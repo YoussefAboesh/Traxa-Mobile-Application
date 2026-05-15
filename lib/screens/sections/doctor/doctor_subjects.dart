@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../models/subject.dart';
+import '../../../models/teaching_assistant.dart';
+import '../../../core/theme.dart';
 
 class DoctorSubjects extends StatefulWidget {
   const DoctorSubjects({super.key});
@@ -14,64 +16,11 @@ class DoctorSubjects extends StatefulWidget {
 
 class _DoctorSubjectsState extends State<DoctorSubjects> {
   String _searchQuery = '';
-  int _selectedLevel = 0; // 0 = All Levels
+  int _selectedLevel = 0;
   bool _showFilters = true;
   bool _isRefreshing = false;
 
   final List<int> _levels = [1, 2, 3, 4];
-
-  Widget _buildLockedScreen(bool isDark) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('My Subjects'),
-        centerTitle: false,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        elevation: 0,
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.lock_rounded,
-                    size: 48, color: Colors.orange),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Subjects are locked',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF1E293B),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Your professor has disabled access to subjects. '
-                'Contact them to enable this section.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.6)
-                      : Colors.grey.shade600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Future<void> _refreshSubjects() async {
     if (_isRefreshing) return;
@@ -92,22 +41,58 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final user = authState.user;
-    final doctorId = user?.effectiveDoctorId ?? 0;
+    final isDark = context.isDarkMode;
     final currentSemester = dataState.currentSemester;
 
-    // 🔒 If a TA's "ta.nav.subjects" permission was revoked by the professor,
-    // open the page but show a locked-state screen instead of subjects.
-    if (user != null && !user.hasTAPermission('ta.nav.subjects')) {
-      return _buildLockedScreen(isDark);
-    }
+    final user = authState.user;
+    
+    final isTA = user?.isTeachingAssistant ?? false;
+    
+    List<Subject> doctorSubjects = [];
+    List<TeachingAssistant> allTAs = dataState.teachingAssistants;
+    
+    print('🔍 DEBUG: currentSemester = $currentSemester');
+    print('🔍 DEBUG: dataState.subjects count = ${dataState.subjects.length}');
+    print('🔍 DEBUG: allTAs count = ${allTAs.length}');
+    
+    if (isTA) {
+      // =========================
+      // TA SUBJECTS
+      // =========================
+      final loggedUserId = user?.id ?? 0;
 
-    // جلب المواد الخاصة بالدكتور في الترم الحالي فقط
-    List<Subject> doctorSubjects = dataState.subjects
-        .where((s) => s.doctorId == doctorId && s.semester == currentSemester)
-        .toList();
+      print('🔐 LOGGED USER ID => $loggedUserId');
+
+      final ta = allTAs.firstWhere(
+        (t) => t.id == loggedUserId,
+        orElse: () => TeachingAssistant(
+          id: -1,
+          name: '',
+          username: '',
+          assignedSubjectIds: [],
+        ),
+      );
+
+      print('✅ MATCHED TA => ${ta.name}');
+      print('✅ TA ID => ${ta.id}');
+
+      doctorSubjects = dataState.subjects.where((subject) {
+        return subject.taId == ta.id;
+      }).toList();
+
+      print('✅ TA Subjects => ${doctorSubjects.length}');
+    } else {
+      // =========================
+      // DOCTOR SUBJECTS
+      // =========================
+      final doctorId = user?.effectiveDoctorId ?? user?.id ?? 0;
+
+      doctorSubjects = dataState.subjects.where((subject) {
+        return subject.doctorId == doctorId;
+      }).toList();
+
+      print('👨‍⚕️ Doctor Subjects => ${doctorSubjects.length}');
+    }
 
     // فلترة حسب البحث
     if (_searchQuery.isNotEmpty) {
@@ -359,8 +344,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                 delegate: SliverChildListDelegate(
                   subjectsByLevel.keys.map((level) {
                     final levelSubjects = subjectsByLevel[level]!;
-
-                    // All subjects are in current semester (no need to split by semester)
                     levelSubjects.sort((a, b) => a.name.compareTo(b.name));
 
                     return Container(
@@ -410,8 +393,8 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           ),
                           const SizedBox(height: 12),
 
-                          // Subjects table (no semester split because all are current semester)
-                          _buildSubjectsTable(levelSubjects),
+                          // Subjects table
+                          _buildSubjectsTable(levelSubjects, allTAs, isTA),
 
                           const SizedBox(height: 8),
                         ],
@@ -441,23 +424,29 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                                 : Colors.grey.shade400),
                         const SizedBox(height: 16),
                         Text(
-                          'No subjects for Semester $currentSemester',
+                          isTA 
+                              ? 'No subjects assigned to you for Semester $currentSemester'
+                              : 'No subjects for Semester $currentSemester',
                           style: TextStyle(
                             color: isDark
                                 ? const Color(0xFF94A3B8)
                                 : Colors.grey.shade600,
                             fontSize: 16,
                           ),
+                          textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Subjects will appear when assigned in the current semester',
+                          isTA
+                              ? 'Subjects will appear when assigned by the professor for this semester'
+                              : 'Subjects will appear when assigned in the current semester',
                           style: TextStyle(
                             fontSize: 12,
                             color: isDark
                                 ? const Color(0xFF64748B)
                                 : Colors.grey.shade500,
                           ),
+                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
@@ -472,8 +461,32 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
     );
   }
 
-  Widget _buildSubjectsTable(List<Subject> subjects) {
+  Widget _buildSubjectsTable(List<Subject> subjects, List<TeachingAssistant> allTAs, bool isTA) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Helper function to get TA name by ID
+    String getTAName(int? taId) {
+      if (taId == null) return 'Not Assigned';
+
+      print('🔍 SEARCHING FOR TA ID => $taId');
+
+      for (var ta in allTAs) {
+        print('   TA => ${ta.id} : ${ta.name}');
+      }
+
+      final ta = allTAs.firstWhere(
+        (t) => t.id == taId,
+        orElse: () => TeachingAssistant(
+          id: 0,
+          name: 'Unknown TA',
+          username: '',
+          assignedSubjectIds: [],
+        ),
+      );
+
+      print('✅ Found TA: ${ta.name}');
+      return ta.name;
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -511,7 +524,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                   ),
                 ),
                 Expanded(
-                  flex: 4,
+                  flex: 3,
                   child: Text(
                     'SUBJECT NAME',
                     style: TextStyle(
@@ -522,7 +535,18 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                   ),
                 ),
                 Expanded(
-                  flex: 3,
+                  flex: 2,
+                  child: Text(
+                    isTA ? 'DOCTOR' : 'TA',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF0EA5E9),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
                   child: Text(
                     'DEPARTMENT',
                     style: TextStyle(
@@ -556,6 +580,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
               ),
               child: Row(
                 children: [
+                  // Code
                   Expanded(
                     flex: 2,
                     child: Text(
@@ -568,8 +593,9 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                       ),
                     ),
                   ),
+                  // Subject Name
                   Expanded(
-                    flex: 4,
+                    flex: 3,
                     child: Text(
                       subject.name,
                       style: TextStyle(
@@ -578,8 +604,9 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                       ),
                     ),
                   ),
+                  // TA Name (for Doctor) or Doctor Name (for TA)
                   Expanded(
-                    flex: 3,
+                    flex: 2,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 3),
@@ -588,11 +615,32 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        subject.department ?? 'General',
+                        isTA ? subject.doctorName : getTAName(subject.taId),
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w500,
                           color: Color(0xFF10B981),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  // Department
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        subject.department ?? 'General',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF8B5CF6),
                         ),
                         textAlign: TextAlign.center,
                       ),

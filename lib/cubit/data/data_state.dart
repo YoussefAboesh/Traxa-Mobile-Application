@@ -162,7 +162,7 @@ class DataState extends Equatable {
     List<Lecture>? allLectures,
     List<Section>? allSections, // ← جديد
     int? currentSemester,
-    String? currentAcademicYear,
+    String? currentAcademicYear, required List<TeachingAssistant> teachingAssistants,
   }) =>
       DataState(
         students: students,

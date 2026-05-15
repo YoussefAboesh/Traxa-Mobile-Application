@@ -5,6 +5,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../core/helpers.dart';
+import '../../../core/theme.dart';
 
 class DoctorOverview extends StatefulWidget {
   const DoctorOverview({super.key});
@@ -32,7 +33,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = context.isDarkMode;
 
     final user = authState.user;
     final doctorId = user?.effectiveDoctorId ?? 0;
@@ -65,7 +66,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            // ── Hero Header ───────────────────────────────────────────────
+            // Hero Header
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -85,7 +86,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                     Expanded(
                       child: Text(
                         isTA 
-                            ? 'Welcome back, Dr. ${user?.name ?? 'TA'} 🎓'
+                            ? 'Welcome back, Dr. ${user?.name ?? 'TA'} 👩‍🏫'
                             : 'Welcome back, ${user?.name ?? 'Doctor'} 👤',
                         style: const TextStyle(
                           color: Colors.white,
@@ -157,15 +158,20 @@ class _DoctorOverviewState extends State<DoctorOverview> {
 
             const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-            // ── Today's Schedule ──────────────────────────────────────────
+            // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E293B)
-                      : const Color(0xFF0F172A),
+                      : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.grey.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,7 +197,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                                 const Text(
                                   'Today\'s Schedule',
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Color(0xFF0EA5E9),
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -230,11 +236,11 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                     ),
                     const Divider(color: Colors.white12, height: 1),
                     if (todaysLectures.isEmpty)
-                      _buildEmptySchedule()
+                      _buildEmptySchedule(isDark)
                     else
                       ...todaysLectures.map((lecture) => Padding(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                            child: _buildLectureItem(lecture, context, isDark),
+                            child: _buildLectureItem(lecture, isDark),
                           )),
                     const SizedBox(height: 12),
                   ],
@@ -254,38 +260,49 @@ class _DoctorOverviewState extends State<DoctorOverview> {
     );
   }
 
-  Widget _buildEmptySchedule() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 36),
+  Widget _buildEmptySchedule(bool isDark) {
+    final textColor = isDark ? const Color(0xFF64748B) : Colors.grey.shade500;
+    final iconColor = isDark ? const Color(0xFF334155) : Colors.grey.shade400;
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 36),
       child: Center(
         child: Column(
           children: [
             Icon(Icons.event_available_rounded,
-                size: 48, color: Color(0xFF1E3A5F)),
-            SizedBox(height: 12),
+                size: 48, color: iconColor),
+            const SizedBox(height: 12),
             Text(
               'No lectures or sections scheduled for today',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              style: TextStyle(color: textColor, fontSize: 13),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text('Enjoy your day off! 🎉',
-                style: TextStyle(color: Color(0xFF475569), fontSize: 11)),
+                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildLectureItem(
-      dynamic lecture, BuildContext context, bool isDark) {
+  Widget _buildLectureItem(dynamic lecture, bool isDark) {
+    final cardBg = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.grey.shade100;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : Colors.grey.shade200;
+    final textColor = isDark ? Colors.white : const Color(0xFF1E293B);
+    final subTextColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
+
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: cardBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
@@ -301,8 +318,8 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(lecture.subjectName,
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: textColor,
                           fontWeight: FontWeight.bold,
                           fontSize: 13)),
                   const SizedBox(height: 3),
@@ -311,8 +328,8 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                         size: 10, color: Color(0xFF94A3B8)),
                     const SizedBox(width: 3),
                     Text(lecture.timeDisplay,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF94A3B8))),
+                        style: TextStyle(
+                            fontSize: 10, color: subTextColor)),
                     const SizedBox(width: 10),
                     const Icon(Icons.location_on_rounded,
                         size: 10, color: Color(0xFF94A3B8)),
@@ -320,15 +337,15 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                     Flexible(
                       child: Text(lecture.locationName,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 10, color: Color(0xFF94A3B8))),
+                          style: TextStyle(
+                              fontSize: 10, color: subTextColor)),
                     ),
                   ]),
                   const SizedBox(height: 2),
                   Text(
                     'Level ${lecture.level} • ${lecture.department ?? 'General'}',
-                    style: const TextStyle(
-                        fontSize: 9, color: Color(0xFF64748B)),
+                    style: TextStyle(
+                        fontSize: 9, color: subTextColor.withValues(alpha: 0.7)),
                   ),
                 ]),
           ),
@@ -337,11 +354,11 @@ class _DoctorOverviewState extends State<DoctorOverview> {
             decoration: BoxDecoration(
                 color: const Color(0xFF0EA5E9).withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(10)),
-            child: const Text('Today',
+            child: Text('Today',
                 style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF0EA5E9))),
+                    color: const Color(0xFF0EA5E9))),
           ),
         ],
       ),

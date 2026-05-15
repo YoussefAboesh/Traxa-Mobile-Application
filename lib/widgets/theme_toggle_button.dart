@@ -1,19 +1,23 @@
 // lib/widgets/theme_toggle_button.dart
-// ✅ Widget مشترك — بدل تكرار الـ theme toggle في student و doctor
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/theme/theme_cubit.dart';
 
 class ThemeToggleButton extends StatelessWidget {
-  /// لون الـ gradient في light mode (اختياري)
   final Color? lightModeColor;
+  final double size;
 
-  const ThemeToggleButton({super.key, this.lightModeColor});
+  const ThemeToggleButton({
+    super.key,
+    this.lightModeColor,
+    this.size = 36,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = context.watch<ThemeCubit>().state.themeMode == ThemeMode.dark;
-    final fallbackColor = lightModeColor ?? Colors.indigo.shade400;
+    final primaryColor = Theme.of(context).primaryColor;
+    final fallbackColor = lightModeColor ?? primaryColor;
 
     return GestureDetector(
       onTap: () => context.read<ThemeCubit>().toggleTheme(),
@@ -27,9 +31,8 @@ class ThemeToggleButton extends StatelessWidget {
         },
         child: Container(
           key: ValueKey<bool>(isDarkMode),
-          margin: const EdgeInsets.only(right: 8),
-          width: 42,
-          height: 42,
+          width: size,
+          height: size,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: isDarkMode
@@ -42,15 +45,15 @@ class ThemeToggleButton extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: (isDarkMode ? Colors.amber : fallbackColor).withValues(alpha: 0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
           child: Icon(
             isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
             color: Colors.white,
-            size: 24,
+            size: size * 0.5,
           ),
         ),
       ),

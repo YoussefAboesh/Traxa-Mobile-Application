@@ -3,11 +3,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:traxa_mobile/models/lecture.dart';
 import 'package:traxa_mobile/models/subject.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../core/api_service.dart';
 import '../../../core/helpers.dart';
+import '../../../core/theme.dart';
 import '../../../models/grade.dart';
 
 class StudentOverview extends StatefulWidget {
@@ -140,7 +142,7 @@ class _StudentOverviewState extends State<StudentOverview> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final dataState = context.watch<DataCubit>().state;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = context.isDarkMode;
     final user = authState.user;
 
     final student = (user != null)
@@ -174,10 +176,17 @@ class _StudentOverviewState extends State<StudentOverview> {
 
     final studentSubjects = dataState.getSubjectsForStudent(student);
     final studentLectures = dataState.getLecturesForStudent(student);
+    final studentSections = dataState.getSectionsForStudent(student);
 
     final todayName = getTodayDayName();
     final todaysLectures =
         studentLectures.where((l) => l.day == todayName).toList();
+    final todaysSections =
+        studentSections.where((s) => s.day == todayName).toList();
+    
+    // Combine lectures and sections for today
+    final todaySchedule = <dynamic>[...todaysLectures, ...todaysSections];
+    todaySchedule.sort((a, b) => a.timeDisplay.compareTo(b.timeDisplay));
 
     final now = DateTime.now();
     final dayNames = [
@@ -307,7 +316,6 @@ class _StudentOverviewState extends State<StudentOverview> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                // ✅ تغيير من Level لـ Semester
                                 'Welcome back, ${student.name.split(' ').first} 👋',
                                 style: const TextStyle(
                                   color: Colors.white,
@@ -369,7 +377,6 @@ class _StudentOverviewState extends State<StudentOverview> {
                                       size: 12, color: Colors.white),
                                   const SizedBox(width: 4),
                                   Text(
-                                    // ✅ تغيير من Level لـ Semester
                                     'Semester $semester',
                                     style: const TextStyle(
                                         fontSize: 11,
@@ -435,8 +442,13 @@ class _StudentOverviewState extends State<StudentOverview> {
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E293B)
-                      : const Color(0xFF0F172A),
+                      : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.grey.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -463,7 +475,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                                 const Text(
                                   'Today\'s Schedule',
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Color(0xFF8B5CF6),
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -497,24 +509,25 @@ class _StudentOverviewState extends State<StudentOverview> {
                                   fontWeight: FontWeight.w600),
                             ),
                           ),
-                          // ✅ شيلنا علامة الـ Refresh من هنا
                         ],
                       ),
                     ),
                     const Divider(color: Colors.white12, height: 1),
-                    if (todaysLectures.isEmpty)
-                      _buildEmptySchedule()
+                    if (todaySchedule.isEmpty)
+                      _buildEmptySchedule(isDark)
                     else
-                      ...todaysLectures.map((lecture) => Padding(
+                      ...todaySchedule.map((item) => Padding(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                             child: _buildScheduleItem(
                               context,
-                              name: lecture.subjectName,
-                              time: lecture.timeDisplay,
-                              location: lecture.locationName,
-                              teacher: lecture.doctorName,
-                              type: 'Lec',
-                              typeColor: const Color(0xFF8B5CF6),
+                              name: item.subjectName,
+                              time: item.timeDisplay,
+                              location: item.locationName,
+                              teacher: item is Lecture ? item.doctorName : item.taName,
+                              type: item is Lecture ? 'Lec' : 'Sec',
+                              typeColor: item is Lecture 
+                                  ? const Color(0xFF8B5CF6) 
+                                  : const Color(0xFF10B981),
                               isDark: isDark,
                             ),
                           )),
@@ -550,6 +563,8 @@ class _StudentOverviewState extends State<StudentOverview> {
     final trendText = _getTrendText(trendStatus);
     final trendColor = _getTrendColor(trendStatus);
     final showTrend = trendStatus != 'nodata';
+    final textColor = isDark ? Colors.white : const Color(0xFF1E293B);
+    final subTextColor = isDark ? Colors.white54 : Colors.grey.shade600;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -627,14 +642,14 @@ class _StudentOverviewState extends State<StudentOverview> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      color: textColor,
                     ),
                   ),
                   Text(
                     'Credits',
                     style: TextStyle(
                       fontSize: 10,
-                      color: isDark ? Colors.white54 : Colors.grey.shade600,
+                      color: subTextColor,
                     ),
                   ),
                 ],
@@ -646,14 +661,14 @@ class _StudentOverviewState extends State<StudentOverview> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      color: textColor,
                     ),
                   ),
                   Text(
                     'Subjects',
                     style: TextStyle(
                       fontSize: 10,
-                      color: isDark ? Colors.white54 : Colors.grey.shade600,
+                      color: subTextColor,
                     ),
                   ),
                 ],
@@ -665,23 +680,26 @@ class _StudentOverviewState extends State<StudentOverview> {
     );
   }
 
-  Widget _buildEmptySchedule() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 36),
+  Widget _buildEmptySchedule(bool isDark) {
+    final textColor = isDark ? const Color(0xFF64748B) : Colors.grey.shade500;
+    final iconColor = isDark ? const Color(0xFF334155) : Colors.grey.shade400;
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 36),
       child: Center(
         child: Column(
           children: [
             Icon(Icons.event_available_rounded,
-                size: 48, color: Color(0xFF334155)),
-            SizedBox(height: 12),
+                size: 48, color: iconColor),
+            const SizedBox(height: 12),
             Text(
               'No lectures or sections scheduled for today',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              style: TextStyle(color: textColor, fontSize: 13),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text('Enjoy your day off! 🎉',
-                style: TextStyle(color: Color(0xFF475569), fontSize: 11)),
+                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11)),
           ],
         ),
       ),
@@ -698,13 +716,22 @@ class _StudentOverviewState extends State<StudentOverview> {
     required Color typeColor,
     required bool isDark,
   }) {
+    final cardBg = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.grey.shade100;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : Colors.grey.shade200;
+    final textColor = isDark ? Colors.white : const Color(0xFF1E293B);
+    final subTextColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
+
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: cardBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
@@ -723,8 +750,8 @@ class _StudentOverviewState extends State<StudentOverview> {
               children: [
                 Text(
                   name,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: textColor,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -738,8 +765,8 @@ class _StudentOverviewState extends State<StudentOverview> {
                         size: 10, color: Color(0xFF94A3B8)),
                     const SizedBox(width: 3),
                     Text(time,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF94A3B8))),
+                        style: TextStyle(
+                            fontSize: 10, color: subTextColor)),
                     const SizedBox(width: 10),
                     const Icon(Icons.location_on_rounded,
                         size: 10, color: Color(0xFF94A3B8)),
@@ -747,8 +774,8 @@ class _StudentOverviewState extends State<StudentOverview> {
                     Flexible(
                       child: Text(location,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 10, color: Color(0xFF94A3B8))),
+                          style: TextStyle(
+                              fontSize: 10, color: subTextColor)),
                     ),
                   ],
                 ),
@@ -761,8 +788,8 @@ class _StudentOverviewState extends State<StudentOverview> {
                     Flexible(
                       child: Text(
                         teacher,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF64748B)),
+                        style: TextStyle(
+                            fontSize: 10, color: subTextColor),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),

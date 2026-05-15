@@ -6,14 +6,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
-import '../cubit/theme/theme_cubit.dart';
 import '../services/websocket_service.dart';
 import '../widgets/settings_bottom_sheet.dart';
+import '../widgets/theme_toggle_button.dart';
+import '../models/teaching_assistant.dart';
 import 'sections/doctor/doctor_overview.dart';
 import 'sections/doctor/doctor_subjects.dart';
 import 'sections/doctor/doctor_attendance.dart';
 import 'sections/doctor/doctor_reports.dart';
 import 'sections/doctor/doctor_ta_management.dart';
+import 'sections/doctor/doctor_profile.dart';
 
 class DoctorScreen extends StatefulWidget {
   const DoctorScreen({super.key});
@@ -35,6 +37,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
     {'key': 'ta.nav.subjects', 'label': 'Subjects', 'icon': Icons.book_rounded},
     {'key': 'ta.nav.attendance', 'label': 'Attendance', 'icon': Icons.how_to_reg_rounded},
     {'key': 'ta.nav.reports', 'label': 'Reports', 'icon': Icons.analytics_rounded},
+    {'key': 'ta.nav.profile', 'label': 'Profile', 'icon': Icons.person_rounded},
   ];
 
   static const List<Widget> _allSections = [
@@ -42,6 +45,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
     DoctorSubjects(),
     DoctorAttendance(),
     DoctorReports(),
+    DoctorProfile(),
   ];
 
   List<Map<String, Object>> _visibleTabs(dynamic user) {
@@ -286,9 +290,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
-    final themeCubit = context.watch<ThemeCubit>();
     final doctor = authState.user;
-    final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     String? doctorEmail;
@@ -322,8 +324,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+                  gradient: LinearGradient(
+                    colors: [Theme.of(context).primaryColor, const Color(0xFF0284C7)],
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -403,7 +405,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
             ),
             onPressed: _isReloading ? null : _fullReload,
           ),
-          _buildAnimatedThemeToggle(isDarkMode),
+          const ThemeToggleButton(),
           Container(
             margin: const EdgeInsets.only(right: 8),
             child: StreamBuilder<bool>(
@@ -500,56 +502,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
     );
   }
 
-  Widget _buildAnimatedThemeToggle(bool isDarkMode) {
-    const doctorPrimaryColor = Color(0xFF0EA5E9);
-
-    return GestureDetector(
-      onTap: () {
-        context.read<ThemeCubit>().toggleTheme();
-      },
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400),
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          return RotationTransition(
-            turns: animation,
-            child: ScaleTransition(
-              scale: animation,
-              child: child,
-            ),
-          );
-        },
-        child: Container(
-          key: ValueKey<bool>(isDarkMode),
-          margin: const EdgeInsets.only(right: 8),
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isDarkMode
-                  ? [Colors.amber.shade300, Colors.orange.shade400]
-                  : [doctorPrimaryColor, doctorPrimaryColor.withValues(alpha: 0.7)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: (isDarkMode ? Colors.amber : doctorPrimaryColor).withValues(alpha: 0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(
-            isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
-            color: Colors.white,
-            size: 18,
-          ),
-        ),
-      ),
-    );
-  }
-
   void setSelectedIndex(int index) {
     if (mounted) {
       setState(() {
@@ -560,6 +512,20 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
   Widget _buildDrawer(BuildContext context, dynamic doctor, String? email) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dataState = context.read<DataCubit>().state;
+    
+    // ✅ Get correct email for TA from teachingAssistants list
+    String displayEmail = email ?? '';
+    
+    if (doctor.isTeachingAssistant) {
+      final ta = dataState.teachingAssistants.firstWhere(
+        (t) => t.id == doctor.id,
+        orElse: () => TeachingAssistant(id: 0, name: '', username: ''),
+      );
+      if (ta.email != null && ta.email!.isNotEmpty) {
+        displayEmail = ta.email!;
+      }
+    }
 
     return Drawer(
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
@@ -624,10 +590,10 @@ class _DoctorScreenState extends State<DoctorScreen> {
                     color: Colors.white.withValues(alpha: 0.7),
                   ),
                 ),
-                if (email != null && email.isNotEmpty) ...[
+                if (displayEmail.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    email,
+                    displayEmail,
                     style: TextStyle(
                       fontSize: 11,
                       color: Colors.white.withValues(alpha: 0.5),
@@ -676,7 +642,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
                   title: 'Profile',
                   onTap: () {
                     Navigator.pop(context);
-                    setSelectedIndex(3);
+                    setSelectedIndex(4);
                   },
                 ),
                 if (doctor.isDoctor && !doctor.isTeachingAssistant)

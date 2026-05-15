@@ -7,9 +7,9 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:collection/collection.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
-import '../cubit/theme/theme_cubit.dart';
 import '../services/websocket_service.dart';
 import '../widgets/settings_bottom_sheet.dart';
+import '../widgets/theme_toggle_button.dart';
 import 'sections/student/student_overview.dart';
 import 'sections/student/student_schedule.dart';
 import 'sections/student/student_grades.dart';
@@ -301,9 +301,7 @@ class _StudentScreenState extends State<StudentScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
-    final themeCubit = context.watch<ThemeCubit>();
     final user = authState.user;
-    final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
 
     if (user == null) {
       return const Scaffold(
@@ -401,7 +399,7 @@ class _StudentScreenState extends State<StudentScreen> {
             ),
             onPressed: _isReloading ? null : _fullReload,
           ),
-          _buildAnimatedThemeToggle(isDarkMode),
+          const ThemeToggleButton(lightModeColor: Color(0xFF8B5CF6)),
           Container(
             margin: const EdgeInsets.only(right: 8),
             child: StreamBuilder<bool>(
@@ -469,55 +467,6 @@ class _StudentScreenState extends State<StudentScreen> {
             ),
             elevation: 0,
             items: _navItems,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAnimatedThemeToggle(bool isDarkMode) {
-    return GestureDetector(
-      onTap: () {
-        context.read<ThemeCubit>().toggleTheme();
-      },
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400),
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          return RotationTransition(
-            turns: animation,
-            child: ScaleTransition(
-              scale: animation,
-              child: child,
-            ),
-          );
-        },
-        child: Container(
-          key: ValueKey<bool>(isDarkMode),
-          margin: const EdgeInsets.only(right: 8),
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isDarkMode
-                  ? [Colors.amber.shade300, Colors.orange.shade400]
-                  : [Colors.indigo.shade400, Colors.purple.shade400],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: (isDarkMode ? Colors.amber : Colors.purple)
-                    .withValues(alpha: 0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(
-            isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
-            color: Colors.white,
-            size: 18,
           ),
         ),
       ),

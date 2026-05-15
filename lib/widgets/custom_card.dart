@@ -1,6 +1,6 @@
 // lib/widgets/custom_card.dart
-// ✅ Fix: بيشتغل في light و dark mode بدل هاردكودد dark
 import 'package:flutter/material.dart';
+import '../core/theme.dart';
 
 class CustomCard extends StatelessWidget {
   final Widget child;
@@ -18,7 +18,7 @@ class CustomCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = context.isDarkMode;
 
     return Container(
       margin: margin ?? const EdgeInsets.all(0),
@@ -30,7 +30,6 @@ class CustomCard extends StatelessWidget {
           child: Ink(
             padding: padding ?? const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              // ✅ Fix: يتغير حسب الثيم
               color: isDark ? const Color(0xFF1E293B) : Colors.white,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(

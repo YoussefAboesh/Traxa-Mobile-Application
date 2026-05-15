@@ -1,9 +1,8 @@
 // lib/widgets/settings_bottom_sheet.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../cubit/theme/theme_cubit.dart';
 import 'toast_message.dart';
+import 'theme_toggle_button.dart';
 
 class SettingsBottomSheet extends StatefulWidget {
   const SettingsBottomSheet({super.key});
@@ -40,19 +39,18 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final themeCubit = context.watch<ThemeCubit>();
-    final isDarkMode = themeCubit.state.themeMode == ThemeMode.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
-    
+
     return Container(
-      height: MediaQuery.of(context).size.height * 0.45,
+      height: MediaQuery.of(context).size.height * 0.4,
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
         children: [
-          // Handle bar - improved
+          // Handle bar
           Container(
             margin: const EdgeInsets.symmetric(vertical: 12),
             width: 48,
@@ -125,21 +123,13 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
 
                 const SizedBox(height: 12),
 
-                // 🌙 Dark Mode Card
+                // 🌙 Dark Mode Card - Use ThemeToggleButton instead of Switch
                 _buildModernSettingsTile(
                   context: context,
-                  icon: isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                  icon: isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
                   title: 'Dark Mode',
-                  subtitle: isDarkMode ? 'Switch to light theme' : 'Switch to dark theme',
-                  trailing: Switch(
-                    value: isDarkMode,
-                    onChanged: (value) {
-                      themeCubit.toggleTheme();
-                      _saveSettings();
-                    },
-                    activeThumbColor: primaryColor,
-                    activeTrackColor: primaryColor.withValues(alpha: 0.4),
-                  ),
+                  subtitle: isDark ? 'Switch to light theme' : 'Switch to dark theme',
+                  trailing: const ThemeToggleButton(size: 32),
                 ),
 
                 const SizedBox(height: 24),
@@ -234,7 +224,7 @@ class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
                     ],
                   ),
                 ),
-                // Trailing widget (Switch)
+                // Trailing widget
                 trailing,
               ],
             ),

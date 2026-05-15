@@ -10,14 +10,27 @@ class AppTheme {
   static const Color warningColor = Color(0xFFF59E0B);
   static const Color errorColor = Color(0xFFEF4444);
 
-  // Dark Theme
+  static const Color darkBackground = Color(0xFF0F172A);
+  static const Color darkCard = Color(0xFF1E293B);
+  static const Color darkSurface = Color(0xFF0F172A);
+  static const Color lightBackground = Color(0xFFF8FAFC);
+  static const Color lightCard = Colors.white;
+  static const Color lightSurface = Colors.white;
+
+  static const Color darkTextPrimary = Colors.white;
+  static const Color darkTextSecondary = Color(0xFF94A3B8);
+  static const Color darkTextHint = Color(0xFF64748B);
+  static const Color lightTextPrimary = Color(0xFF1E293B);
+  static const Color lightTextSecondary = Color(0xFF475569);
+  static const Color lightTextHint = Color(0xFF64748B);
+
   static ThemeData darkTheme = ThemeData(
     brightness: Brightness.dark,
     primaryColor: primaryColor,
-    scaffoldBackgroundColor: const Color(0xFF0F172A),
-    cardColor: const Color(0xFF1E293B),
+    scaffoldBackgroundColor: darkBackground,
+    cardColor: darkCard,
     cardTheme: CardThemeData(
-      color: const Color(0xFF1E293B),
+      color: darkCard,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -50,8 +63,8 @@ class AppTheme {
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: primaryColor),
       ),
-      hintStyle: const TextStyle(color: Color(0xFF94A3B8)),
-      labelStyle: const TextStyle(color: Color(0xFF94A3B8)),
+      hintStyle: const TextStyle(color: darkTextHint),
+      labelStyle: const TextStyle(color: darkTextSecondary),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
@@ -70,30 +83,29 @@ class AppTheme {
       titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white),
       titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white),
       bodyLarge: TextStyle(fontSize: 16, color: Colors.white),
-      bodyMedium: TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
-      bodySmall: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+      bodyMedium: TextStyle(fontSize: 14, color: darkTextSecondary),
+      bodySmall: TextStyle(fontSize: 12, color: darkTextHint),
     ),
     dividerTheme: DividerThemeData(
       color: Colors.white.withValues(alpha: 0.1),
       thickness: 1,
     ),
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: Color(0xFF1E293B),
+      backgroundColor: darkCard,
       selectedItemColor: primaryColor,
-      unselectedItemColor: Color(0xFF94A3B8),
+      unselectedItemColor: darkTextSecondary,
       type: BottomNavigationBarType.fixed,
       elevation: 8,
     ),
   );
 
-  // Light Theme
   static ThemeData lightTheme = ThemeData(
     brightness: Brightness.light,
     primaryColor: primaryColor,
-    scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-    cardColor: Colors.white,
+    scaffoldBackgroundColor: lightBackground,
+    cardColor: lightCard,
     cardTheme: CardThemeData(
-      color: Colors.white,
+      color: lightCard,
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -105,11 +117,11 @@ class AppTheme {
       elevation: 0,
       centerTitle: false,
       titleTextStyle: TextStyle(
-        color: Color(0xFF1E293B),
+        color: lightTextPrimary,
         fontSize: 20,
         fontWeight: FontWeight.bold,
       ),
-      iconTheme: IconThemeData(color: Color(0xFF1E293B)),
+      iconTheme: IconThemeData(color: lightTextPrimary),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -140,13 +152,13 @@ class AppTheme {
       ),
     ),
     textTheme: const TextTheme(
-      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-      headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-      titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-      titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-      bodyLarge: TextStyle(fontSize: 16, color: Color(0xFF1E293B)),
-      bodyMedium: TextStyle(fontSize: 14, color: Color(0xFF475569)),
-      bodySmall: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: lightTextPrimary),
+      headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: lightTextPrimary),
+      titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: lightTextPrimary),
+      titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: lightTextPrimary),
+      bodyLarge: TextStyle(fontSize: 16, color: lightTextPrimary),
+      bodyMedium: TextStyle(fontSize: 14, color: lightTextSecondary),
+      bodySmall: TextStyle(fontSize: 12, color: lightTextHint),
     ),
     dividerTheme: DividerThemeData(
       color: Colors.grey.shade200,
@@ -160,4 +172,19 @@ class AppTheme {
       elevation: 8,
     ),
   );
+}
+
+// ✅ Extension للحصول على isDarkMode بسهولة في أي widget
+extension ThemeContextExtension on BuildContext {
+  bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
+  
+  Color get adaptiveCardColor => isDarkMode ? AppTheme.darkCard : AppTheme.lightCard;
+  
+  Color get adaptiveTextPrimary => isDarkMode ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+  
+  Color get adaptiveTextSecondary => isDarkMode ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+  
+  Color get adaptiveHintColor => isDarkMode ? AppTheme.darkTextHint : AppTheme.lightTextHint;
+  
+  Color get adaptiveBackground => isDarkMode ? AppTheme.darkBackground : AppTheme.lightBackground;
 }

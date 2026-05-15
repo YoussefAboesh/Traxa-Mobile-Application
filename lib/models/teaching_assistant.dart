@@ -1,3 +1,5 @@
+// lib/models/teaching_assistant.dart
+
 class TeachingAssistant {
   final int id;
   final String name;
@@ -5,6 +7,7 @@ class TeachingAssistant {
   final String? email;
   final int? supervisorDoctorId;
   final Map<String, dynamic>? permissions;
+  final List<int> assignedSubjectIds;
 
   TeachingAssistant({
     required this.id,
@@ -13,6 +16,7 @@ class TeachingAssistant {
     this.email,
     this.supervisorDoctorId,
     this.permissions,
+    this.assignedSubjectIds = const [],
   });
 
   factory TeachingAssistant.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,30 @@ class TeachingAssistant {
       permissions: json['permissions'] != null
           ? Map<String, dynamic>.from(json['permissions'])
           : null,
+      assignedSubjectIds: json['assigned_subject_ids'] != null
+          ? List<int>.from(json['assigned_subject_ids'])
+          : [],
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'username': username,
+      'email': email,
+      'supervisor_doctor_id': supervisorDoctorId,
+      'permissions': permissions,
+      'assigned_subject_ids': assignedSubjectIds,
+    };
+  }
+
+  bool get hasPermissions => permissions != null && permissions!.isNotEmpty;
+  
+  bool hasPermission(String key) {
+    if (permissions == null) return false;
+    return permissions![key] == true;
+  }
+  
+  bool get isAssignedToSubject => assignedSubjectIds.isNotEmpty;
 }
