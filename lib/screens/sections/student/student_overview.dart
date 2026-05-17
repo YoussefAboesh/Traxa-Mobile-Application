@@ -3,14 +3,19 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:traxa_mobile/models/lecture.dart';
+import 'package:traxa_mobile/models/student.dart';
 import 'package:traxa_mobile/models/subject.dart';
+import 'package:traxa_mobile/models/section.dart';
+import 'package:traxa_mobile/models/teaching_assistant.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../core/api_service.dart';
 import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
 import '../../../models/grade.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class StudentOverview extends StatefulWidget {
   const StudentOverview({super.key});
@@ -29,6 +34,32 @@ class _StudentOverviewState extends State<StudentOverview> {
     _loadCurrentSemester();
   }
 
+  /// يحلّ اسم المعيد للسكشن فوراً من البيانات المحمّلة (من غير أي API call).
+  String _sectionTAName(
+    Section section,
+    List<TeachingAssistant> tas,
+    List<Subject> subjects,
+  ) {
+    final fromSection = section.taName.trim();
+    if (fromSection.isNotEmpty && fromSection.toLowerCase() != 'ta') {
+      return fromSection;
+    }
+    if (section.taId != null) {
+      final m = tas.where((t) => t.id == section.taId).toList();
+      if (m.isNotEmpty && m.first.name.trim().isNotEmpty) {
+        return m.first.name;
+      }
+    }
+    final subj = subjects.where((s) => s.id == section.subjectId).toList();
+    if (subj.isNotEmpty) {
+      final tn = subj.first.taName?.trim();
+      if (tn != null && tn.isNotEmpty && tn.toLowerCase() != 'not assigned') {
+        return tn;
+      }
+    }
+    return 'TA';
+  }
+
   Future<void> _loadCurrentSemester() async {
     final sem = await ApiService.getCurrentSemester();
     if (mounted) {
@@ -39,16 +70,16 @@ class _StudentOverviewState extends State<StudentOverview> {
   /// حساب GPA التراكمي من أول مستوى 1 لحد مستوى وسيمستر معين
   double _calculateCumulativeGPAUpTo(List<Grade> allVisibleGrades, List<Subject> allSubjects, int upToLevel, int upToSemester) {
     List<Grade> cumulativeGrades = [];
-    
+
     for (final grade in allVisibleGrades) {
       final subject = allSubjects.firstWhere(
         (s) => s.id == grade.subjectId,
         orElse: () => Subject(id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
       );
-      
+
       if (subject.level < upToLevel) {
         cumulativeGrades.add(grade);
-      } 
+      }
       else if (subject.level == upToLevel) {
         if (upToSemester == 2 && grade.semester <= 2) {
           cumulativeGrades.add(grade);
@@ -57,7 +88,7 @@ class _StudentOverviewState extends State<StudentOverview> {
         }
       }
     }
-    
+
     return calculateGPA(cumulativeGrades, allSubjects);
   }
 
@@ -138,6 +169,28 @@ class _StudentOverviewState extends State<StudentOverview> {
     return 'Needs Improvement';
   }
 
+  /// صفوف وهمية تُعرض كـ Skeleton أثناء تحميل بيانات الطالب.
+  List<Lecture> _placeholderLectures() {
+    return List.generate(
+      2,
+      (i) => Lecture(
+        id: -1 - i,
+        subjectId: 0,
+        subjectName: 'Subject Name',
+        doctorId: 0,
+        doctorName: 'Doctor Name',
+        level: 1,
+        department: 'General',
+        day: '',
+        timeslotId: 0,
+        timeDisplay: '00:00 - 00:00',
+        locationId: 0,
+        locationName: 'Location',
+        active: true,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
@@ -145,7 +198,7 @@ class _StudentOverviewState extends State<StudentOverview> {
     final isDark = context.isDarkMode;
     final user = authState.user;
 
-    final student = (user != null)
+    final realStudent = (user != null)
         ? findStudentSafely(
             userId: user.id,
             username: user.username,
@@ -153,11 +206,24 @@ class _StudentOverviewState extends State<StudentOverview> {
           )
         : null;
 
-    if (student == null) {
+    // الطالب مش موجود والبيانات اتحمّلت فعلاً → رسالة فقط.
+    if (realStudent == null && dataState.loadingState.isLoaded) {
       return const Scaffold(
         body: Center(child: Text('Student data not found')),
       );
     }
+
+    // أثناء التحميل بنعرض نفس شكل الصفحة بالظبط كـ Skeleton (مش شكل عام).
+    final bool showSkeleton =
+        dataState.loadingState.isLoading || realStudent == null;
+    final student = realStudent ??
+        Student(
+          id: 0,
+          name: 'Student Name',
+          studentId: '00000000',
+          level: 1,
+          department: 'General',
+        );
 
     final currentLevel = student.level;
     final semester = _currentSemester ?? dataState.currentSemester;
@@ -183,10 +249,14 @@ class _StudentOverviewState extends State<StudentOverview> {
         studentLectures.where((l) => l.day == todayName).toList();
     final todaysSections =
         studentSections.where((s) => s.day == todayName).toList();
-    
+
     // Combine lectures and sections for today
     final todaySchedule = <dynamic>[...todaysLectures, ...todaysSections];
     todaySchedule.sort((a, b) => a.timeDisplay.compareTo(b.timeDisplay));
+    // أثناء التحميل بنحط صفوف وهمية عشان الـ Skeleton يبان زي شكل الصفحة.
+    if (showSkeleton && todaySchedule.isEmpty) {
+      todaySchedule.addAll(_placeholderLectures());
+    }
 
     final now = DateTime.now();
     final dayNames = [
@@ -285,7 +355,9 @@ class _StudentOverviewState extends State<StudentOverview> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: showSkeleton,
+        child: RefreshIndicator(
         onRefresh: _refreshData,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
@@ -294,8 +366,8 @@ class _StudentOverviewState extends State<StudentOverview> {
             // Hero Header
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                padding: const EdgeInsets.all(20),
+                margin: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 0),
+                padding: EdgeInsets.all(20.r),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
@@ -304,7 +376,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                         ? [const Color(0xFF1E1B4B), const Color(0xFF312E81)]
                         : [const Color(0xFF8B5CF6), const Color(0xFF6366F1)],
                   ),
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(24.r),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,18 +389,18 @@ class _StudentOverviewState extends State<StudentOverview> {
                             children: [
                               Text(
                                 'Welcome back, ${student.name.split(' ').first} 👋',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 20,
+                                  fontSize: 20.sp,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              SizedBox(height: 4.h),
                               Text(
                                 'Track your academic performance at a glance',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.75),
-                                  fontSize: 12,
+                                  fontSize: 12.sp,
                                 ),
                               ),
                             ],
@@ -338,48 +410,48 @@ class _StudentOverviewState extends State<StudentOverview> {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 10.w, vertical: 5.h),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF10B981)
                                     .withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(20),
+                                borderRadius: BorderRadius.circular(20.r),
                                 border: Border.all(
                                     color: const Color(0xFF10B981)
                                         .withValues(alpha: 0.5)),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.circle,
-                                      size: 7, color: Color(0xFF10B981)),
-                                  SizedBox(width: 4),
+                                      size: 7.sp, color: const Color(0xFF10B981)),
+                                  SizedBox(width: 4.w),
                                   Text('Active',
                                       style: TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFF10B981),
+                                          fontSize: 11.sp,
+                                          color: const Color(0xFF10B981),
                                           fontWeight: FontWeight.w600)),
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            SizedBox(height: 6.h),
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 10.w, vertical: 5.h),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
+                                borderRadius: BorderRadius.circular(20.r),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.layers_rounded,
-                                      size: 12, color: Colors.white),
-                                  const SizedBox(width: 4),
+                                  Icon(Icons.layers_rounded,
+                                      size: 12.sp, color: Colors.white),
+                                  SizedBox(width: 4.w),
                                   Text(
                                     'Semester $semester',
-                                    style: const TextStyle(
-                                        fontSize: 11,
+                                    style: TextStyle(
+                                        fontSize: 11.sp,
                                         color: Colors.white,
                                         fontWeight: FontWeight.w600),
                                   ),
@@ -395,12 +467,12 @@ class _StudentOverviewState extends State<StudentOverview> {
               ),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
             // GPA Cards Row
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.symmetric(horizontal: 16.w),
                 child: Row(
                   children: [
                     Expanded(
@@ -415,7 +487,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                         isDark: isDark,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12.w),
                     Expanded(
                       child: _buildGpaCard(
                         context,
@@ -433,17 +505,17 @@ class _StudentOverviewState extends State<StudentOverview> {
               ),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
             // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
+                margin: EdgeInsets.symmetric(horizontal: 16.w),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E293B)
                       : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(20.r),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.1)
@@ -454,58 +526,58 @@ class _StudentOverviewState extends State<StudentOverview> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      padding: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 8.h),
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: EdgeInsets.all(8.r),
                             decoration: BoxDecoration(
                               color: const Color(0xFF8B5CF6)
                                   .withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(12.r),
                             ),
-                            child: const Icon(Icons.calendar_today_rounded,
-                                color: Color(0xFF8B5CF6), size: 18),
+                            child: Icon(Icons.calendar_today_rounded,
+                                color: const Color(0xFF8B5CF6), size: 18.sp),
                           ),
-                          const SizedBox(width: 10),
+                          SizedBox(width: 10.w),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Today\'s Schedule',
                                   style: TextStyle(
-                                    color: Color(0xFF8B5CF6),
-                                    fontSize: 15,
+                                    color: const Color(0xFF8B5CF6),
+                                    fontSize: 15.sp,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 Text(
                                   formattedDate,
-                                  style: const TextStyle(
-                                    color: Color(0xFF64748B),
-                                    fontSize: 11,
+                                  style: TextStyle(
+                                    color: const Color(0xFF64748B),
+                                    fontSize: 11.sp,
                                   ),
                                 ),
                               ],
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 10.w, vertical: 5.h),
                             decoration: BoxDecoration(
                               color: const Color(0xFF8B5CF6)
                                   .withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: BorderRadius.circular(20.r),
                               border: Border.all(
                                   color: const Color(0xFF8B5CF6)
                                       .withValues(alpha: 0.3)),
                             ),
                             child: Text(
                               todayName,
-                              style: const TextStyle(
-                                  color: Color(0xFF8B5CF6),
-                                  fontSize: 11,
+                              style: TextStyle(
+                                  color: const Color(0xFF8B5CF6),
+                                  fontSize: 11.sp,
                                   fontWeight: FontWeight.w600),
                             ),
                           ),
@@ -517,21 +589,26 @@ class _StudentOverviewState extends State<StudentOverview> {
                       _buildEmptySchedule(isDark)
                     else
                       ...todaySchedule.map((item) => Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                            padding: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 4.h),
                             child: _buildScheduleItem(
                               context,
                               name: item.subjectName,
                               time: item.timeDisplay,
                               location: item.locationName,
-                              teacher: item is Lecture ? item.doctorName : item.taName,
+                              teacher: item is Lecture
+                                  ? item.doctorName
+                                  : _sectionTAName(
+                                      item as Section,
+                                      dataState.teachingAssistants,
+                                      dataState.allSubjects),
                               type: item is Lecture ? 'Lec' : 'Sec',
-                              typeColor: item is Lecture 
-                                  ? const Color(0xFF8B5CF6) 
+                              typeColor: item is Lecture
+                                  ? const Color(0xFF8B5CF6)
                                   : const Color(0xFF10B981),
                               isDark: isDark,
                             ),
                           )),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12.h),
                   ],
                 ),
               ),
@@ -544,6 +621,7 @@ class _StudentOverviewState extends State<StudentOverview> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -567,12 +645,12 @@ class _StudentOverviewState extends State<StudentOverview> {
     final subTextColor = isDark ? Colors.white54 : Colors.grey.shade600;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16.r),
       decoration: BoxDecoration(
         color: isDark
             ? color.withValues(alpha: 0.12)
             : color.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Column(
@@ -581,46 +659,46 @@ class _StudentOverviewState extends State<StudentOverview> {
           Text(
             gpa.toStringAsFixed(2),
             style: TextStyle(
-              fontSize: 32,
+              fontSize: 32.sp,
               fontWeight: FontWeight.bold,
               color: color,
             ),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4.h),
           Text(
             'GPA',
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 12.sp,
               color: isDark ? Colors.white70 : Colors.grey.shade600,
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8.h),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(20.r),
             ),
             child: Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 11.sp,
                 fontWeight: FontWeight.w600,
                 color: color,
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8.h),
           if (showTrend)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(trendIcon, size: 14, color: trendColor),
-                const SizedBox(width: 4),
+                Icon(trendIcon, size: 14.sp, color: trendColor),
+                SizedBox(width: 4.w),
                 Text(
                   trendText,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 11.sp,
                     fontWeight: FontWeight.w600,
                     color: trendColor,
                   ),
@@ -628,10 +706,10 @@ class _StudentOverviewState extends State<StudentOverview> {
               ],
             )
           else
-            const SizedBox(height: 20),
-          const SizedBox(height: 12),
+            SizedBox(height: 20.h),
+          SizedBox(height: 12.h),
           const Divider(height: 1),
-          const SizedBox(height: 12),
+          SizedBox(height: 12.h),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
@@ -640,7 +718,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                   Text(
                     '$credits',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
                       color: textColor,
                     ),
@@ -648,7 +726,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                   Text(
                     'Credits',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 10.sp,
                       color: subTextColor,
                     ),
                   ),
@@ -659,7 +737,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                   Text(
                     '$subjects',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
                       color: textColor,
                     ),
@@ -667,7 +745,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                   Text(
                     'Subjects',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 10.sp,
                       color: subTextColor,
                     ),
                   ),
@@ -683,23 +761,23 @@ class _StudentOverviewState extends State<StudentOverview> {
   Widget _buildEmptySchedule(bool isDark) {
     final textColor = isDark ? const Color(0xFF64748B) : Colors.grey.shade500;
     final iconColor = isDark ? const Color(0xFF334155) : Colors.grey.shade400;
-    
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36),
+      padding: EdgeInsets.symmetric(vertical: 36.h),
       child: Center(
         child: Column(
           children: [
             Icon(Icons.event_available_rounded,
-                size: 48, color: iconColor),
-            const SizedBox(height: 12),
+                size: 48.sp, color: iconColor),
+            SizedBox(height: 12.h),
             Text(
               'No lectures or sections scheduled for today',
               textAlign: TextAlign.center,
-              style: TextStyle(color: textColor, fontSize: 13),
+              style: TextStyle(color: textColor, fontSize: 13.sp),
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: 4.h),
             Text('Enjoy your day off! 🎉',
-                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11)),
+                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11.sp)),
           ],
         ),
       ),
@@ -726,24 +804,24 @@ class _StudentOverviewState extends State<StudentOverview> {
     final subTextColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 4),
+      padding: EdgeInsets.all(12.r),
+      margin: EdgeInsets.only(bottom: 4.h),
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12.r),
         border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
           Container(
-            width: 3,
-            height: 40,
+            width: 3.w,
+            height: 40.h,
             decoration: BoxDecoration(
               color: typeColor,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(2.r),
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10.w),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -753,43 +831,43 @@ class _StudentOverviewState extends State<StudentOverview> {
                   style: TextStyle(
                     color: textColor,
                     fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                    fontSize: 13.sp,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 3),
+                SizedBox(height: 3.h),
                 Row(
                   children: [
-                    const Icon(Icons.access_time_rounded,
-                        size: 10, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 3),
+                    Icon(Icons.access_time_rounded,
+                        size: 10.sp, color: const Color(0xFF94A3B8)),
+                    SizedBox(width: 3.w),
                     Text(time,
                         style: TextStyle(
-                            fontSize: 10, color: subTextColor)),
-                    const SizedBox(width: 10),
-                    const Icon(Icons.location_on_rounded,
-                        size: 10, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 3),
+                            fontSize: 10.sp, color: subTextColor)),
+                    SizedBox(width: 10.w),
+                    Icon(Icons.location_on_rounded,
+                        size: 10.sp, color: const Color(0xFF94A3B8)),
+                    SizedBox(width: 3.w),
                     Flexible(
                       child: Text(location,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 10, color: subTextColor)),
+                              fontSize: 10.sp, color: subTextColor)),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Row(
                   children: [
-                    const Icon(Icons.school_rounded,
-                        size: 10, color: Color(0xFF64748B)),
-                    const SizedBox(width: 3),
+                    Icon(Icons.school_rounded,
+                        size: 10.sp, color: const Color(0xFF64748B)),
+                    SizedBox(width: 3.w),
                     Flexible(
                       child: Text(
                         teacher,
                         style: TextStyle(
-                            fontSize: 10, color: subTextColor),
+                            fontSize: 10.sp, color: subTextColor),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -799,15 +877,15 @@ class _StudentOverviewState extends State<StudentOverview> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 3.h),
             decoration: BoxDecoration(
               color: typeColor.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(8.r),
             ),
             child: Text(
               type,
               style: TextStyle(
-                fontSize: 9,
+                fontSize: 9.sp,
                 fontWeight: FontWeight.bold,
                 color: typeColor,
               ),

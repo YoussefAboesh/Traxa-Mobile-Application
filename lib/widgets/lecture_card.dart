@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../models/lecture.dart';
 
 class LectureCard extends StatelessWidget {
@@ -18,10 +19,10 @@ class LectureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12.r),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12.r),
       ),
       child: Row(
         children: [
@@ -31,48 +32,48 @@ class LectureCard extends StatelessWidget {
               children: [
                 Text(
                   lecture.subjectName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                    fontSize: 14.sp,
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: 6.h),
                 Row(
                   children: [
-                    const Icon(Icons.access_time, size: 12, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 4),
+                    Icon(Icons.access_time, size: 12.sp, color: const Color(0xFF94A3B8)),
+                    SizedBox(width: 4.w),
                     Text(
                       lecture.timeDisplay,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                      style: TextStyle(fontSize: 11.sp, color: const Color(0xFF94A3B8)),
                     ),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.location_on, size: 12, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 4),
+                    SizedBox(width: 12.w),
+                    Icon(Icons.location_on, size: 12.sp, color: const Color(0xFF94A3B8)),
+                    SizedBox(width: 4.w),
                     Text(
                       lecture.locationName,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                      style: TextStyle(fontSize: 11.sp, color: const Color(0xFF94A3B8)),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Text(
                   'Level ${lecture.level} • ${lecture.department ?? 'N/A'}',
-                  style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                  style: TextStyle(fontSize: 10.sp, color: const Color(0xFF94A3B8)),
                 ),
               ],
             ),
           ),
           if (showAction)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
               decoration: BoxDecoration(
                 color: Colors.green.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(16.r),
                 border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
               ),
-              child: const Text(
+              child: Text(
                 'Activate',
-                style: TextStyle(fontSize: 10, color: Colors.green),
+                style: TextStyle(fontSize: 10.sp, color: Colors.green),
               ),
             ),
         ],

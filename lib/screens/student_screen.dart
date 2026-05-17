@@ -3,12 +3,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:collection/collection.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../services/websocket_service.dart';
-import '../widgets/settings_bottom_sheet.dart';
 import '../widgets/theme_toggle_button.dart';
 import 'sections/student/student_overview.dart';
 import 'sections/student/student_schedule.dart';
@@ -133,18 +132,18 @@ class _StudentScreenState extends State<StudentScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Row(
+            content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 18),
-                SizedBox(width: 12),
-                Text('Data refreshed successfully!'),
+                Icon(Icons.check_circle, color: Colors.white, size: 18.sp),
+                SizedBox(width: 12.w),
+                const Text('Data refreshed successfully!'),
               ],
             ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
             shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
           ),
         );
       }
@@ -155,16 +154,16 @@ class _StudentScreenState extends State<StudentScreen> {
           SnackBar(
             content: Row(
               children: [
-                Icon(Icons.error_outline, color: Colors.white, size: 18),
-                SizedBox(width: 12),
+                Icon(Icons.error_outline, color: Colors.white, size: 18.sp),
+                SizedBox(width: 12.w),
                 Expanded(child: Text('Error: ${e.toString()}')),
               ],
             ),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
             shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
           ),
         );
       }
@@ -223,7 +222,7 @@ class _StudentScreenState extends State<StudentScreen> {
               duration: const Duration(seconds: 2),
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12.r)),
             ),
           );
         }
@@ -243,7 +242,7 @@ class _StudentScreenState extends State<StudentScreen> {
           duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
         ),
       );
       context.read<DataCubit>().loadAllData();
@@ -259,7 +258,7 @@ class _StudentScreenState extends State<StudentScreen> {
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
         ),
       );
       await _fullReload();
@@ -316,34 +315,34 @@ class _StudentScreenState extends State<StudentScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 32.w,
+              height: 32.w,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
                 ),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(8.r),
               ),
-              child: const Center(
-                child: FaIcon(FontAwesomeIcons.userGraduate, color: Colors.white, size: 18),
+              child: Center(
+                child: FaIcon(FontAwesomeIcons.userGraduate, color: Colors.white, size: 18.sp),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8.w),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
               decoration: BoxDecoration(
                 color: Colors.purple.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(20.r),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.calendar_today, size: 10, color: Colors.purple),
-                  const SizedBox(width: 4),
+                  Icon(Icons.calendar_today, size: 10.sp, color: Colors.purple),
+                  SizedBox(width: 4.w),
                   Text(
                     _localAcademicYear,
-                    style: const TextStyle(
-                      fontSize: 10,
+                    style: TextStyle(
+                      fontSize: 10.sp,
                       fontWeight: FontWeight.w500,
                       color: Colors.purple,
                     ),
@@ -356,52 +355,22 @@ class _StudentScreenState extends State<StudentScreen> {
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: Icon(Icons.menu_rounded, color: Theme.of(context).primaryColor),
-            onPressed: () {
-              Scaffold.of(context).openDrawer();
-            },
-          ),
-        ),
         actions: [
           IconButton(
-            icon: Icon(Icons.notifications_none_rounded,
-                color: Theme.of(context).hintColor),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('No new notifications'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: _isReloading
-                  ? const SizedBox(
-                      key: ValueKey('loading'),
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFF8B5CF6),
-                      ),
-                    )
-                  : Icon(
-                      Icons.refresh_rounded,
-                      key: const ValueKey('refresh'),
-                      color: Theme.of(context).primaryColor,
-                      size: 22,
-                    ),
+            // الريفريش بقى بيظهر Skeleton جوّه الصفحة بدل الدايرة التقليدية،
+            // فالزرار بيفضل أيقونة بس بتبهت شوية أثناء التحميل.
+            icon: Icon(
+              Icons.refresh_rounded,
+              color: Theme.of(context).primaryColor.withValues(
+                    alpha: _isReloading ? 0.4 : 1.0,
+                  ),
+              size: 22.sp,
             ),
             onPressed: _isReloading ? null : _fullReload,
           ),
           const ThemeToggleButton(lightModeColor: Color(0xFF8B5CF6)),
           Container(
-            margin: const EdgeInsets.only(right: 8),
+            margin: EdgeInsets.only(right: 8.w),
             child: StreamBuilder<bool>(
               stream: Stream.periodic(const Duration(seconds: 1),
                   (_) => WebSocketService.instance.isConnected),
@@ -409,8 +378,8 @@ class _StudentScreenState extends State<StudentScreen> {
               builder: (context, snapshot) {
                 final isConnected = snapshot.data ?? false;
                 return Container(
-                  width: 8,
-                  height: 8,
+                  width: 8.w,
+                  height: 8.w,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isConnected ? Colors.green : Colors.red,
@@ -418,7 +387,7 @@ class _StudentScreenState extends State<StudentScreen> {
                       BoxShadow(
                         color: (isConnected ? Colors.green : Colors.red)
                             .withValues(alpha: 0.5),
-                        blurRadius: 4,
+                        blurRadius: 4.r,
                       ),
                     ],
                   ),
@@ -428,22 +397,21 @@ class _StudentScreenState extends State<StudentScreen> {
           ),
         ],
       ),
-      drawer: _buildDrawer(context, user),
       body: _sections[_selectedIndex],
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 20,
-              offset: const Offset(0, -5),
+              blurRadius: 20.r,
+              offset: Offset(0, -5.h),
             ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(24),
-            topRight: Radius.circular(24),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24.r),
+            topRight: Radius.circular(24.r),
           ),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
@@ -457,13 +425,13 @@ class _StudentScreenState extends State<StudentScreen> {
                 Theme.of(context).bottomNavigationBarTheme.backgroundColor,
             selectedItemColor: const Color(0xFF8B5CF6),
             unselectedItemColor: Theme.of(context).hintColor,
-            selectedLabelStyle: const TextStyle(
+            selectedLabelStyle: TextStyle(
               fontWeight: FontWeight.w600,
-              fontSize: 12,
+              fontSize: 12.sp,
             ),
-            unselectedLabelStyle: const TextStyle(
+            unselectedLabelStyle: TextStyle(
               fontWeight: FontWeight.w500,
-              fontSize: 12,
+              fontSize: 12.sp,
             ),
             elevation: 0,
             items: _navItems,
@@ -479,272 +447,5 @@ class _StudentScreenState extends State<StudentScreen> {
         _selectedIndex = index;
       });
     }
-  }
-
-  Widget _buildDrawer(BuildContext context, dynamic user) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final dataState = context.read<DataCubit>().state;
-    
-    // ✅ استخدام firstWhereOrNull بدلاً من firstWith orElse
-    final student = dataState.students.firstWhereOrNull(
-      (s) => s.id == user.id,
-    );
-    
-    String department = student?.department ?? 'General';
-    int level = student?.level ?? 1;
-    String studentName = student?.name ?? user.name;
-    String studentId = student?.studentId ?? user.username;
-
-    return Drawer(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
-      width: 280,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topRight: Radius.circular(24),
-          bottomRight: Radius.circular(24),
-        ),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
-              ),
-              borderRadius: BorderRadius.only(
-                topRight: Radius.circular(24),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Center(
-                    child: FaIcon(FontAwesomeIcons.userGraduate, color: Color(0xFF8B5CF6), size: 36),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  studentName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  studentId,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.7),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.badge, size: 12, color: Colors.white),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Student • Level $level • $department',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.white,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _buildDrawerItem(
-                  icon: Icons.person_rounded,
-                  title: 'Profile',
-                  onTap: () {
-                    Navigator.pop(context);
-                    setSelectedIndex(3);
-                  },
-                ),
-                _buildDrawerItem(
-                  icon: Icons.settings_rounded,
-                  title: 'Settings',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showSettingsDialog(context);
-                  },
-                ),
-                const Divider(
-                  color: Colors.white10,
-                  thickness: 1,
-                  indent: 20,
-                  endIndent: 20,
-                ),
-                _buildDrawerItem(
-                  icon: Icons.logout_rounded,
-                  title: 'Logout',
-                  isDestructive: true,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showLogoutDialog(context);
-                  },
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              'Traxa v2.0.0',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.3)
-                    : Colors.grey.shade500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDrawerItem({
-    required IconData icon,
-    required String title,
-    required VoidCallback onTap,
-    bool isDestructive = false,
-  }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: isDestructive
-            ? Colors.redAccent
-            : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-        size: 24,
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
-          color: isDestructive
-              ? Colors.redAccent
-              : (isDark ? Colors.white : const Color(0xFF1E293B)),
-        ),
-      ),
-      trailing: isDestructive
-          ? null
-          : Icon(
-              Icons.chevron_right,
-              size: 20,
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.3)
-                  : Colors.grey.shade400,
-            ),
-      onTap: onTap,
-      hoverColor: Colors.white.withValues(alpha: 0.05),
-      splashColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
-    );
-  }
-
-  void _showSettingsDialog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => const SettingsBottomSheet(),
-    );
-  }
-
-  void _showLogoutDialog(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.logout, color: Colors.redAccent, size: 28),
-            SizedBox(width: 12),
-            Text(
-              'Logout',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        content: Text(
-          'Are you sure you want to logout?',
-          style: TextStyle(
-              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(
-              foregroundColor:
-                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-            ),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.read<AuthCubit>().logout();
-              context.read<DataCubit>().clearData();
-              WebSocketService.instance.disconnect();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
   }
 }

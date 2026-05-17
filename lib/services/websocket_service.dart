@@ -2,11 +2,13 @@
 // ✅ FIX: Improved reconnection and stream handling + Academic Year Support
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants.dart';
+import 'secure_storage_service.dart';
 
 class WebSocketService {
   static WebSocketService? _instance;
@@ -140,11 +142,14 @@ class WebSocketService {
       _initStreams();
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    final userData = prefs.getString('user_data');
+    // ✅ FIX: the auth token & user data live in encrypted SecureStorage —
+    // NOT in SharedPreferences. Reading them from SharedPreferences always
+    // returned null, so connect() bailed out and the socket never came up
+    // (the "online" dot stayed red even though the server was reachable).
+    final token = await SecureStorageService.getToken();
+    final userData = await SecureStorageService.getUserData();
 
-    if (token == null || userData == null) {
+    if (token == null || token.isEmpty || userData == null) {
       print('⚠️ No token or user data, skipping WebSocket connection');
       return;
     }
@@ -164,7 +169,25 @@ class WebSocketService {
     final wsUrl = '${AppConstants.wsUrl}?type=mobile';
 
     try {
-      _channel = IOWebSocketChannel.connect(Uri.parse(wsUrl));
+      // The server runs on the local network with a self-signed
+      // certificate. Connect through an HttpClient that explicitly trusts
+      // that one host so the wss:// TLS handshake succeeds — relying on the
+      // global HttpOverrides alone is not reliable for IOWebSocketChannel.
+      final trustedHost = Uri.parse(AppConstants.baseUrl).host;
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            ((X509Certificate cert, String host, int port) =>
+                host == trustedHost)
+        ..connectionTimeout = const Duration(seconds: 10);
+
+      // Awaiting WebSocket.connect means _isConnected only flips to true
+      // once the handshake has actually completed — so the online dot is
+      // accurate instead of optimistically green/red.
+      final socket = await WebSocket.connect(wsUrl, customClient: httpClient)
+          .timeout(const Duration(seconds: 12));
+
+      _channel = IOWebSocketChannel(socket);
+      _isConnected = true;
       _reconnectAttempts = 0;
 
       _channel!.stream.listen(
@@ -184,9 +207,6 @@ class WebSocketService {
         },
       );
 
-      _isConnected = true;
-      await Future.delayed(const Duration(milliseconds: 500));
-
       sendMessage({
         'type': 'REGISTER',
         'clientType': clientType,
@@ -200,6 +220,8 @@ class WebSocketService {
       print('✅ WebSocket connected and registered');
     } catch (e) {
       print('❌ WebSocket connection failed: $e');
+      _isConnected = false;
+      _channel = null;
       _scheduleReconnect();
     }
   }
@@ -450,12 +472,13 @@ class WebSocketService {
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts) {
-      print('❌ Max reconnect attempts reached, giving up');
-      return;
-    }
+    if (_isConnected) return;
     _reconnectTimer?.cancel();
-    final delay = Duration(seconds: min(5 * (_reconnectAttempts + 1), 30));
+    // Exponential-ish backoff capped at 30s. We never permanently give up —
+    // otherwise the app would stay "offline" forever after a transient drop
+    // even once the server is reachable again.
+    final delay = Duration(
+        seconds: min(5 * (min(_reconnectAttempts, maxReconnectAttempts) + 1), 30));
     _reconnectTimer = Timer(delay, () {
       _reconnectAttempts++;
       print('🔄 Reconnecting WebSocket (attempt $_reconnectAttempts)...');

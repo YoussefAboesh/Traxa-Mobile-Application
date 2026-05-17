@@ -1,11 +1,13 @@
 // lib/screens/sections/doctor/doctor_overview.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class DoctorOverview extends StatefulWidget {
   const DoctorOverview({super.key});
@@ -60,7 +62,9 @@ class _DoctorOverviewState extends State<DoctorOverview> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: dataState.loadingState.isLoading,
+        child: RefreshIndicator(
         onRefresh: _refreshData,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
@@ -69,8 +73,8 @@ class _DoctorOverviewState extends State<DoctorOverview> {
             // Hero Header
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                padding: const EdgeInsets.all(20),
+                margin: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 0),
+                padding: EdgeInsets.all(20.r),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
@@ -79,70 +83,70 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                         ? [const Color(0xFF0C1A2E), const Color(0xFF0F2942)]
                         : [const Color(0xFF0EA5E9), const Color(0xFF0284C7)],
                   ),
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(24.r),
                 ),
                 child: Row(
                   children: [
                     Expanded(
                       child: Text(
-                        isTA 
+                        isTA
                             ? 'Welcome back, Dr. ${user?.name ?? 'TA'} 👩‍🏫'
                             : 'Welcome back, ${user?.name ?? 'Doctor'} 👤',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: 18.sp,
                           fontWeight: FontWeight.bold,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12.w),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 10.w, vertical: 5.h),
                           decoration: BoxDecoration(
                             color: const Color(0xFF10B981).withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20.r),
                             border: Border.all(
                                 color: const Color(0xFF10B981)
                                     .withValues(alpha: 0.5)),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.circle,
-                                  size: 7, color: Color(0xFF10B981)),
-                              SizedBox(width: 4),
+                                  size: 7.sp, color: const Color(0xFF10B981)),
+                              SizedBox(width: 4.w),
                               Text('Active',
                                   style: TextStyle(
-                                      fontSize: 11,
-                                      color: Color(0xFF10B981),
+                                      fontSize: 11.sp,
+                                      color: const Color(0xFF10B981),
                                       fontWeight: FontWeight.w600)),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: 6.h),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 10.w, vertical: 5.h),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20.r),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.layers_rounded,
-                                  size: 12, color: Colors.white),
-                              const SizedBox(width: 4),
+                              Icon(Icons.layers_rounded,
+                                  size: 12.sp, color: Colors.white),
+                              SizedBox(width: 4.w),
                               Text(
                                 'Semester ${dataState.currentSemester}',
-                                style: const TextStyle(
-                                    fontSize: 11,
+                                style: TextStyle(
+                                    fontSize: 11.sp,
                                     color: Colors.white,
                                     fontWeight: FontWeight.w600),
                               ),
@@ -156,17 +160,17 @@ class _DoctorOverviewState extends State<DoctorOverview> {
               ),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
             // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
+                margin: EdgeInsets.symmetric(horizontal: 16.w),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E293B)
                       : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(20.r),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.1)
@@ -177,57 +181,57 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      padding: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 8.h),
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: EdgeInsets.all(8.r),
                             decoration: BoxDecoration(
                               color: const Color(0xFF0EA5E9)
                                   .withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(12.r),
                             ),
-                            child: const Icon(FontAwesomeIcons.chalkboardUser, color: Color(0xFF0EA5E9), size: 18),
+                            child: Icon(FontAwesomeIcons.chalkboardUser, color: const Color(0xFF0EA5E9), size: 18.sp),
                           ),
-                          const SizedBox(width: 10),
+                          SizedBox(width: 10.w),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Today\'s Schedule',
                                   style: TextStyle(
-                                    color: Color(0xFF0EA5E9),
-                                    fontSize: 15,
+                                    color: const Color(0xFF0EA5E9),
+                                    fontSize: 15.sp,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 Text(
                                   formattedDate,
-                                  style: const TextStyle(
-                                    color: Color(0xFF64748B),
-                                    fontSize: 11,
+                                  style: TextStyle(
+                                    color: const Color(0xFF64748B),
+                                    fontSize: 11.sp,
                                   ),
                                 ),
                               ],
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 10.w, vertical: 5.h),
                             decoration: BoxDecoration(
                               color: const Color(0xFF0EA5E9)
                                   .withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: BorderRadius.circular(20.r),
                               border: Border.all(
                                   color: const Color(0xFF0EA5E9)
                                       .withValues(alpha: 0.3)),
                             ),
                             child: Text(
                               todayName,
-                              style: const TextStyle(
-                                  color: Color(0xFF0EA5E9),
-                                  fontSize: 11,
+                              style: TextStyle(
+                                  color: const Color(0xFF0EA5E9),
+                                  fontSize: 11.sp,
                                   fontWeight: FontWeight.w600),
                             ),
                           ),
@@ -239,10 +243,10 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                       _buildEmptySchedule(isDark)
                     else
                       ...todaysLectures.map((lecture) => Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                            padding: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 4.h),
                             child: _buildLectureItem(lecture, isDark),
                           )),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12.h),
                   ],
                 ),
               ),
@@ -257,29 +261,30 @@ class _DoctorOverviewState extends State<DoctorOverview> {
           ],
         ),
       ),
+      ),
     );
   }
 
   Widget _buildEmptySchedule(bool isDark) {
     final textColor = isDark ? const Color(0xFF64748B) : Colors.grey.shade500;
     final iconColor = isDark ? const Color(0xFF334155) : Colors.grey.shade400;
-    
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36),
+      padding: EdgeInsets.symmetric(vertical: 36.h),
       child: Center(
         child: Column(
           children: [
             Icon(Icons.event_available_rounded,
-                size: 48, color: iconColor),
-            const SizedBox(height: 12),
+                size: 48.sp, color: iconColor),
+            SizedBox(height: 12.h),
             Text(
               'No lectures or sections scheduled for today',
               textAlign: TextAlign.center,
-              style: TextStyle(color: textColor, fontSize: 13),
+              style: TextStyle(color: textColor, fontSize: 13.sp),
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: 4.h),
             Text('Enjoy your day off! 🎉',
-                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11)),
+                style: TextStyle(color: textColor.withValues(alpha: 0.7), fontSize: 11.sp)),
           ],
         ),
       ),
@@ -297,22 +302,22 @@ class _DoctorOverviewState extends State<DoctorOverview> {
     final subTextColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 4),
+      padding: EdgeInsets.all(12.r),
+      margin: EdgeInsets.only(bottom: 4.h),
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12.r),
         border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
           Container(
-              width: 3,
-              height: 44,
+              width: 3.w,
+              height: 44.h,
               decoration: BoxDecoration(
                   color: const Color(0xFF0EA5E9),
-                  borderRadius: BorderRadius.circular(2))),
-          const SizedBox(width: 12),
+                  borderRadius: BorderRadius.circular(2.r))),
+          SizedBox(width: 12.w),
           Expanded(
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -321,42 +326,42 @@ class _DoctorOverviewState extends State<DoctorOverview> {
                       style: TextStyle(
                           color: textColor,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13)),
-                  const SizedBox(height: 3),
+                          fontSize: 13.sp)),
+                  SizedBox(height: 3.h),
                   Row(children: [
                     const Icon(Icons.access_time_rounded,
                         size: 10, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 3),
+                    SizedBox(width: 3.w),
                     Text(lecture.timeDisplay,
                         style: TextStyle(
-                            fontSize: 10, color: subTextColor)),
-                    const SizedBox(width: 10),
+                            fontSize: 10.sp, color: subTextColor)),
+                    SizedBox(width: 10.w),
                     const Icon(Icons.location_on_rounded,
                         size: 10, color: Color(0xFF94A3B8)),
-                    const SizedBox(width: 3),
+                    SizedBox(width: 3.w),
                     Flexible(
                       child: Text(lecture.locationName,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 10, color: subTextColor)),
+                              fontSize: 10.sp, color: subTextColor)),
                     ),
                   ]),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2.h),
                   Text(
                     'Level ${lecture.level} • ${lecture.department ?? 'General'}',
                     style: TextStyle(
-                        fontSize: 9, color: subTextColor.withValues(alpha: 0.7)),
+                        fontSize: 9.sp, color: subTextColor.withValues(alpha: 0.7)),
                   ),
                 ]),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
             decoration: BoxDecoration(
                 color: const Color(0xFF0EA5E9).withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10.r)),
             child: Text('Today',
                 style: TextStyle(
-                    fontSize: 9,
+                    fontSize: 9.sp,
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF0EA5E9))),
           ),

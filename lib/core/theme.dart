@@ -1,5 +1,6 @@
 // lib/core/theme.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 class AppTheme {
   static const Color primaryColor = Color(0xFF8B5CF6);
@@ -33,34 +34,34 @@ class AppTheme {
       color: darkCard,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
       ),
     ),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
       titleTextStyle: TextStyle(
         color: Colors.white,
-        fontSize: 20,
+        fontSize: 20.sp,
         fontWeight: FontWeight.bold,
       ),
-      iconTheme: IconThemeData(color: Colors.white),
+      iconTheme: const IconThemeData(color: Colors.white),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: Colors.white.withValues(alpha: 0.05),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: const BorderSide(color: primaryColor),
       ),
       hintStyle: const TextStyle(color: darkTextHint),
@@ -72,19 +73,19 @@ class AppTheme {
         foregroundColor: Colors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(14.r),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: EdgeInsets.symmetric(vertical: 16.h),
       ),
     ),
-    textTheme: const TextTheme(
-      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
-      headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-      titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white),
-      titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white),
-      bodyLarge: TextStyle(fontSize: 16, color: Colors.white),
-      bodyMedium: TextStyle(fontSize: 14, color: darkTextSecondary),
-      bodySmall: TextStyle(fontSize: 12, color: darkTextHint),
+    textTheme: TextTheme(
+      headlineLarge: TextStyle(fontSize: 32.sp, fontWeight: FontWeight.bold, color: Colors.white),
+      headlineMedium: TextStyle(fontSize: 24.sp, fontWeight: FontWeight.bold, color: Colors.white),
+      titleLarge: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.w600, color: Colors.white),
+      titleMedium: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w600, color: Colors.white),
+      bodyLarge: TextStyle(fontSize: 16.sp, color: Colors.white),
+      bodyMedium: TextStyle(fontSize: 14.sp, color: darkTextSecondary),
+      bodySmall: TextStyle(fontSize: 12.sp, color: darkTextHint),
     ),
     dividerTheme: DividerThemeData(
       color: Colors.white.withValues(alpha: 0.1),
@@ -108,34 +109,34 @@ class AppTheme {
       color: lightCard,
       elevation: 2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         side: BorderSide(color: Colors.grey.shade200),
       ),
     ),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
       titleTextStyle: TextStyle(
         color: lightTextPrimary,
-        fontSize: 20,
+        fontSize: 20.sp,
         fontWeight: FontWeight.bold,
       ),
-      iconTheme: IconThemeData(color: lightTextPrimary),
+      iconTheme: const IconThemeData(color: lightTextPrimary),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: Colors.grey.shade100,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: BorderSide(color: Colors.grey.shade300),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         borderSide: const BorderSide(color: primaryColor),
       ),
       hintStyle: TextStyle(color: Colors.grey.shade500),
@@ -146,19 +147,19 @@ class AppTheme {
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(14.r),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: EdgeInsets.symmetric(vertical: 16.h),
       ),
     ),
-    textTheme: const TextTheme(
-      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: lightTextPrimary),
-      headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: lightTextPrimary),
-      titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: lightTextPrimary),
-      titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: lightTextPrimary),
-      bodyLarge: TextStyle(fontSize: 16, color: lightTextPrimary),
-      bodyMedium: TextStyle(fontSize: 14, color: lightTextSecondary),
-      bodySmall: TextStyle(fontSize: 12, color: lightTextHint),
+    textTheme: TextTheme(
+      headlineLarge: TextStyle(fontSize: 32.sp, fontWeight: FontWeight.bold, color: lightTextPrimary),
+      headlineMedium: TextStyle(fontSize: 24.sp, fontWeight: FontWeight.bold, color: lightTextPrimary),
+      titleLarge: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.w600, color: lightTextPrimary),
+      titleMedium: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.w600, color: lightTextPrimary),
+      bodyLarge: TextStyle(fontSize: 16.sp, color: lightTextPrimary),
+      bodyMedium: TextStyle(fontSize: 14.sp, color: lightTextSecondary),
+      bodySmall: TextStyle(fontSize: 12.sp, color: lightTextHint),
     ),
     dividerTheme: DividerThemeData(
       color: Colors.grey.shade200,

@@ -1,12 +1,15 @@
 // lib/screens/sections/student/student_grades.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../models/grade.dart';
+import '../../../models/student.dart';
 import '../../../models/subject.dart';
 import '../../../core/api_service.dart';
 import '../../../core/helpers.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class StudentGrades extends StatefulWidget {
   const StudentGrades({super.key});
@@ -55,22 +58,22 @@ class _StudentGradesState extends State<StudentGrades> {
 
   double calculateCumulativeGPAForFilter(
       List<Grade> allVisibleGrades, List<Subject> allSubjects, int selectedLevel, int selectedSemester) {
-    
+
     if (selectedLevel == 0) {
       return calculateGPA(allVisibleGrades, allSubjects);
     }
-    
+
     List<Grade> cumulativeGrades = [];
-    
+
     for (final grade in allVisibleGrades) {
       final subject = allSubjects.firstWhere(
         (s) => s.id == grade.subjectId,
         orElse: () => Subject(id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
       );
-      
+
       if (subject.level < selectedLevel) {
         cumulativeGrades.add(grade);
-      } 
+      }
       else if (subject.level == selectedLevel) {
         if (selectedSemester == 0) {
           cumulativeGrades.add(grade);
@@ -81,7 +84,7 @@ class _StudentGradesState extends State<StudentGrades> {
         }
       }
     }
-    
+
     return calculateGPA(cumulativeGrades, allSubjects);
   }
 
@@ -92,17 +95,29 @@ class _StudentGradesState extends State<StudentGrades> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = authState.user;
 
-    final student = (user != null)
+    final realStudent = (user != null)
         ? findStudentSafely(
             userId: user.id,
             username: user.username,
             students: dataState.students)
         : null;
 
-    if (student == null) {
+    if (realStudent == null && dataState.loadingState.isLoaded) {
       return const Scaffold(
           body: Center(child: Text('Student data not found')));
     }
+
+    // أثناء التحميل بنعرض نفس شكل الصفحة كـ Skeleton.
+    final bool showSkeleton =
+        dataState.loadingState.isLoading || realStudent == null;
+    final student = realStudent ??
+        Student(
+          id: 0,
+          name: 'Student Name',
+          studentId: '00000000',
+          level: 1,
+          department: 'General',
+        );
 
     final allSubjects = dataState.allSubjects;
     final allGrades = dataState.allGrades;
@@ -132,7 +147,9 @@ class _StudentGradesState extends State<StudentGrades> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: showSkeleton,
+        child: RefreshIndicator(
         onRefresh: _refreshGrades,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
@@ -146,12 +163,12 @@ class _StudentGradesState extends State<StudentGrades> {
             ),
 
             SliverPadding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16.r),
               sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12.w,
+                  mainAxisSpacing: 12.h,
                   childAspectRatio: 1.6,
                 ),
                 delegate: SliverChildListDelegate([
@@ -183,11 +200,11 @@ class _StudentGradesState extends State<StudentGrades> {
 
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                padding: const EdgeInsets.all(12),
+                margin: EdgeInsets.symmetric(horizontal: 16.w),
+                padding: EdgeInsets.all(12.r),
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(16.r),
                   border: Border.all(
                       color: isDark
                           ? Colors.white.withValues(alpha: 0.1)
@@ -197,12 +214,12 @@ class _StudentGradesState extends State<StudentGrades> {
                   children: [
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        padding: EdgeInsets.symmetric(horizontal: 10.w),
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.05)
                               : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(16.r),
                           border: Border.all(
                               color: isDark
                                   ? Colors.white.withValues(alpha: 0.1)
@@ -217,10 +234,10 @@ class _StudentGradesState extends State<StudentGrades> {
                                 color: isDark
                                     ? Colors.white
                                     : const Color(0xFF1E293B),
-                                fontSize: 13),
+                                fontSize: 13.sp),
                             icon: Icon(Icons.filter_list,
                                 color: Theme.of(context).primaryColor,
-                                size: 18),
+                                size: 18.sp),
                             items: const [
                               DropdownMenuItem(
                                   value: 0, child: Text('All Semesters')),
@@ -235,15 +252,15 @@ class _StudentGradesState extends State<StudentGrades> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12.w),
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        padding: EdgeInsets.symmetric(horizontal: 10.w),
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.05)
                               : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(16.r),
                           border: Border.all(
                               color: isDark
                                   ? Colors.white.withValues(alpha: 0.1)
@@ -258,10 +275,10 @@ class _StudentGradesState extends State<StudentGrades> {
                                 color: isDark
                                     ? Colors.white
                                     : const Color(0xFF1E293B),
-                                fontSize: 13),
+                                fontSize: 13.sp),
                             icon: Icon(Icons.layers,
                                 color: Theme.of(context).primaryColor,
-                                size: 18),
+                                size: 18.sp),
                             items: [
                               const DropdownMenuItem(
                                   value: 0, child: Text('All Levels')),
@@ -279,7 +296,7 @@ class _StudentGradesState extends State<StudentGrades> {
               ),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
             if (filteredGrades.isEmpty)
               SliverFillRemaining(
@@ -287,15 +304,15 @@ class _StudentGradesState extends State<StudentGrades> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.school, size: 64, color: Colors.grey.shade400),
-                      const SizedBox(height: 16),
+                      Icon(Icons.school, size: 64.sp, color: Colors.grey.shade400),
+                      SizedBox(height: 16.h),
                       Text('No grades found',
                           style: TextStyle(
-                              fontSize: 16, color: Colors.grey.shade500)),
-                      const SizedBox(height: 8),
+                              fontSize: 16.sp, color: Colors.grey.shade500)),
+                      SizedBox(height: 8.h),
                       Text('Try changing the filters',
                           style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade400)),
+                              fontSize: 13.sp, color: Colors.grey.shade400)),
                     ],
                   ),
                 ),
@@ -304,16 +321,17 @@ class _StudentGradesState extends State<StudentGrades> {
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 6.h),
                     child: _buildGradeCard(filteredGrades[index], allSubjects),
                   ),
                   childCount: filteredGrades.length,
                 ),
               ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            SliverToBoxAdapter(child: SizedBox(height: 100.h)),
           ],
         ),
+      ),
       ),
     );
   }
@@ -324,37 +342,37 @@ class _StudentGradesState extends State<StudentGrades> {
       required IconData icon,
       required Color color}) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12.r),
       decoration: BoxDecoration(
         gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [color, color.withValues(alpha: 0.7)]),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16.r),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 20, color: Colors.white70),
-          const SizedBox(height: 6),
+          Icon(icon, size: 20.sp, color: Colors.white70),
+          SizedBox(height: 6.h),
           Flexible(
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 16,
+                  style: TextStyle(
+                      fontSize: 16.sp,
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ),
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: 2.h),
           Text(title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 9, color: Colors.white70)),
+              style: TextStyle(fontSize: 9.sp, color: Colors.white70)),
         ],
       ),
     );
@@ -365,96 +383,96 @@ class _StudentGradesState extends State<StudentGrades> {
     final isPassed = grade.isPassed;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: EdgeInsets.only(bottom: 4.h),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16.r),
         border: Border.all(color: grade.gradeColor.withValues(alpha: 0.3)),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16.r),
         onTap: () => _showGradeDetails(grade, subject, subjects),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16.r),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
                   Container(
-                    width: 50,
-                    height: 50,
+                    width: 50.w,
+                    height: 50.w,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(colors: [
                         grade.gradeColor,
                         grade.gradeColor.withValues(alpha: 0.7)
                       ]),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(14.r),
                     ),
                     child: Center(
                       child: Text(grade.gradeLetter,
-                          style: const TextStyle(
-                              fontSize: 16,
+                          style: TextStyle(
+                              fontSize: 16.sp,
                               fontWeight: FontWeight.bold,
                               color: Colors.white)),
                     ),
                   ),
-                  const SizedBox(width: 14),
+                  SizedBox(width: 14.w),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(grade.subjectName,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 14)),
-                        const SizedBox(height: 4),
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14.sp)),
+                        SizedBox(height: 4.h),
                         // ✅ السيميستر تحت و wrap text
                         Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
+                          spacing: 6.w,
+                          runSpacing: 4.h,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                               decoration: BoxDecoration(
                                 color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(8.r),
                               ),
                               child: Text(
                                 subject?.code ?? 'N/A',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 10.sp,
                                   fontWeight: FontWeight.w500,
                                   color: Theme.of(context).primaryColor,
                                 ),
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(8.r),
                               ),
                               child: Text(
                                 subject?.doctorName ?? 'N/A',
-                                style: const TextStyle(
-                                  fontSize: 10,
+                                style: TextStyle(
+                                  fontSize: 10.sp,
                                   fontWeight: FontWeight.w500,
-                                  color: Color(0xFF10B981),
+                                  color: const Color(0xFF10B981),
                                 ),
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(8.r),
                               ),
                               child: Text(
                                 'Semester ${grade.semester}',
-                                style: const TextStyle(
-                                  fontSize: 10,
+                                style: TextStyle(
+                                  fontSize: 10.sp,
                                   fontWeight: FontWeight.w500,
-                                  color: Color(0xFFF59E0B),
+                                  color: const Color(0xFFF59E0B),
                                 ),
                               ),
                             ),
@@ -469,21 +487,21 @@ class _StudentGradesState extends State<StudentGrades> {
                       Text('${grade.total.toInt()}/100',
                           style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                              fontSize: 14.sp,
                               color: grade.gradeColor)),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4.h),
                       Container(
                         padding:
-                            const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
                         decoration: BoxDecoration(
                           color: isPassed
                               ? Colors.green.withValues(alpha: 0.1)
                               : Colors.red.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(8.r),
                         ),
                         child: Text(isPassed ? 'Pass' : 'Fail',
                             style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 10.sp,
                                 color: isPassed ? Colors.green : Colors.red,
                                 fontWeight: FontWeight.w600)),
                       ),
@@ -543,42 +561,42 @@ class _StudentGradesState extends State<StudentGrades> {
         height: MediaQuery.of(context).size.height * 0.85,
         decoration: BoxDecoration(
           color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
         ),
         child: Column(
           children: [
             Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 48,
-              height: 4,
+              margin: EdgeInsets.symmetric(vertical: 12.h),
+              width: 48.w,
+              height: 4.h,
               decoration: BoxDecoration(
                   color: Colors.grey.shade600,
-                  borderRadius: BorderRadius.circular(4)),
+                  borderRadius: BorderRadius.circular(4.r)),
             ),
             Padding(
-              padding: const EdgeInsets.all(20),
+              padding: EdgeInsets.all(20.r),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(effectiveSubject.code ?? 'N/A',
                       style: TextStyle(
-                          fontSize: 14, color: Theme.of(context).primaryColor)),
-                  const SizedBox(height: 4),
+                          fontSize: 14.sp, color: Theme.of(context).primaryColor)),
+                  SizedBox(height: 4.h),
                   Text(grade.subjectName,
-                      style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
+                      style: TextStyle(
+                          fontSize: 22.sp, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 4.h),
                   Text(
                       'Semester ${grade.semester} - ${effectiveSubject.doctorName}',
                       style:
-                          TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                          TextStyle(fontSize: 13.sp, color: Colors.grey.shade600)),
                 ],
               ),
             ),
             const Divider(),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.all(20.r),
                 child: Column(
                   children: [
                     _buildDistributionRow('Midterm Exam', grade.midterm,
@@ -596,26 +614,26 @@ class _StudentGradesState extends State<StudentGrades> {
                     const Divider(height: 32),
                     _buildDistributionRow('Total', grade.total, 100,
                         isTotal: true),
-                    const SizedBox(height: 16),
+                    SizedBox(height: 16.h),
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.all(16.r),
                       decoration: BoxDecoration(
                           color: grade.gradeColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12.r)),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Grade Letter',
                               style: TextStyle(fontWeight: FontWeight.w500)),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16.w, vertical: 8.h),
                             decoration: BoxDecoration(
                                 color: grade.gradeColor,
-                                borderRadius: BorderRadius.circular(20)),
+                                borderRadius: BorderRadius.circular(20.r)),
                             child: Text(grade.gradeLetter,
-                                style: const TextStyle(
-                                    fontSize: 16,
+                                style: TextStyle(
+                                    fontSize: 16.sp,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white)),
                           ),
@@ -637,7 +655,7 @@ class _StudentGradesState extends State<StudentGrades> {
     final color =
         isTotal ? Theme.of(context).primaryColor : Colors.grey.shade600;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.only(bottom: 12.h),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -646,24 +664,24 @@ class _StudentGradesState extends State<StudentGrades> {
             children: [
               Text(label,
                   style: TextStyle(
-                      fontSize: isTotal ? 16 : 14,
+                      fontSize: isTotal ? 16.sp : 14.sp,
                       fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
                       color: color)),
               Text('${earned.toInt()} / ${max.toInt()}',
                   style: TextStyle(
-                      fontSize: isTotal ? 16 : 14,
+                      fontSize: isTotal ? 16.sp : 14.sp,
                       fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
                       color: color)),
             ],
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4.h),
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(4.r),
             child: LinearProgressIndicator(
               value: max > 0 ? earned / max : 0,
               backgroundColor: Colors.grey.shade200,
               color: isTotal ? Theme.of(context).primaryColor : Colors.blue,
-              minHeight: 6,
+              minHeight: 6.h,
             ),
           ),
         ],

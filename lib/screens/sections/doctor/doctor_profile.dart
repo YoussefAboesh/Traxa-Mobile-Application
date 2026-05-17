@@ -4,16 +4,22 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../../../models/doctor.dart';
 import '../../../models/teaching_assistant.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../core/constants.dart';
 import '../../../core/theme.dart';
+import '../../../core/api_service.dart';
+import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
+import '../../../widgets/profile_avatar.dart';
+import '../../../widgets/app_skeleton.dart';
+import 'doctor_ta_management.dart';
 
 class DoctorProfile extends StatefulWidget {
   const DoctorProfile({super.key});
@@ -23,15 +29,30 @@ class DoctorProfile extends StatefulWidget {
 }
 
 class _DoctorProfileState extends State<DoctorProfile> {
-  String? _avatarUrl;
-  bool _isLoadingAvatar = false;
   bool _isRefreshing = false;
   final ImagePicker _imagePicker = ImagePicker();
+
+  /// نسخة الصورة — بتتغيّر مع كل رفع/حذف/تحديث (cache-busting).
+  int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
+
+  /// رابط صورة الدكتور/المعيد على السيرفر (مع نسخة للمزامنة مع الويب).
+  /// بنستخدم `user.id` (نفس الـ id للدكتور والمعيد) عشان مايحصلش تداخل.
+  String? get _avatarUrl {
+    final user = context.read<AuthCubit>().state.user;
+    if (user == null) return null;
+    return '${AppConstants.baseUrl}/api/doctor/avatar/${user.id}?v=$_avatarVersion';
+  }
+
+  /// يجدّد نسخة الصورة → CachedNetworkImage يجيب أحدث صورة من السيرفر.
+  void _bumpAvatar() {
+    if (mounted) {
+      setState(() => _avatarVersion = DateTime.now().millisecondsSinceEpoch);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadAvatar();
   }
 
   Future<void> _refreshProfile() async {
@@ -40,43 +61,12 @@ class _DoctorProfileState extends State<DoctorProfile> {
     try {
       await context.read<AuthCubit>().refreshUserData();
       await context.read<DataCubit>().loadAllData();
-      await _loadAvatar();
+      // مزامنة مع الويب: نجدّد نسخة الصورة فبتتجاب من السيرفر من جديد.
+      _bumpAvatar();
     } catch (e) {
       print('Error refreshing profile: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
-    }
-  }
-
-  Future<void> _loadAvatar() async {
-    final authState = context.read<AuthCubit>().state;
-    if (authState.user == null) return;
-
-    final doctorId = authState.user!.effectiveDoctorId.toString();
-    final token = authState.token;
-
-    if (token == null) return;
-
-    setState(() => _isLoadingAvatar = true);
-
-    try {
-      final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/doctor/avatar/$doctorId'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _avatarUrl = '${AppConstants.baseUrl}/api/doctor/avatar/$doctorId';
-        });
-      } else if (response.statusCode == 404) {
-        setState(() => _avatarUrl = null);
-      }
-    } catch (e) {
-      print('Error loading avatar: $e');
-      setState(() => _avatarUrl = null);
-    } finally {
-      if (mounted) setState(() => _isLoadingAvatar = false);
     }
   }
 
@@ -86,33 +76,33 @@ class _DoctorProfileState extends State<DoctorProfile> {
     showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
       ),
       builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: EdgeInsets.symmetric(vertical: 16.h),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 48,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
+                width: 48.w,
+                height: 4.h,
+                margin: EdgeInsets.only(bottom: 16.h),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade400,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(4.r),
                 ),
               ),
               Text(
                 'Profile Photo',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 18.sp,
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : const Color(0xFF1E293B),
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16.h),
               _buildImageOptionTile(
                 icon: Icons.camera_alt_rounded,
                 label: 'Take Photo',
@@ -141,7 +131,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     _removeAvatar();
                   },
                 ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8.h),
             ],
           ),
         ),
@@ -158,17 +148,17 @@ class _DoctorProfileState extends State<DoctorProfile> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: Container(
-        padding: const EdgeInsets.all(10),
+        padding: EdgeInsets.all(10.r),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12.r),
         ),
-        child: Icon(icon, color: color, size: 22),
+        child: Icon(icon, color: color, size: 22.sp),
       ),
       title: Text(
         label,
         style: TextStyle(
-          fontSize: 15,
+          fontSize: 15.sp,
           fontWeight: FontWeight.w500,
           color: isDark ? Colors.white : const Color(0xFF1E293B),
         ),
@@ -184,7 +174,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
       return;
     }
 
-    final doctorId = authState.user!.effectiveDoctorId.toString();
+    final doctorId = authState.user!.id.toString();
     final token = authState.token!;
 
     try {
@@ -196,8 +186,23 @@ class _DoctorProfileState extends State<DoctorProfile> {
       );
 
       if (pickedFile == null) return;
+      if (!mounted) return;
 
       ToastMessage.showInfo(context, 'Uploading...');
+
+      // نوع الصورة لازم يتبعت صريح — من غيره السيرفر بيرفض الملف ويرجّع 500
+      final lower = pickedFile.path.toLowerCase();
+      String ext = 'jpg', subtype = 'jpeg';
+      if (lower.endsWith('.png')) {
+        ext = 'png';
+        subtype = 'png';
+      } else if (lower.endsWith('.gif')) {
+        ext = 'gif';
+        subtype = 'gif';
+      } else if (lower.endsWith('.webp')) {
+        ext = 'webp';
+        subtype = 'webp';
+      }
 
       final request = http.MultipartRequest(
         'POST',
@@ -205,25 +210,42 @@ class _DoctorProfileState extends State<DoctorProfile> {
       );
 
       request.headers['Authorization'] = 'Bearer $token';
-      request.files
-          .add(await http.MultipartFile.fromPath('avatar', pickedFile.path));
+      request.files.add(await http.MultipartFile.fromPath(
+        'avatar',
+        pickedFile.path,
+        filename: 'avatar.$ext',
+        contentType: MediaType('image', subtype),
+      ));
 
       final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
-        final responseData = await response.stream.bytesToString();
-        final data = jsonDecode(responseData);
+        final data = jsonDecode(responseBody);
 
         if (data['success'] == true) {
+          final url = _avatarUrl;
+          if (url != null) await ProfileAvatar.evict(url);
+          _bumpAvatar();
+          if (!mounted) return;
           ToastMessage.showSuccess(context, 'Profile photo updated!');
-          await _loadAvatar();
         } else {
+          if (!mounted) return;
           ToastMessage.showError(context, data['error'] ?? 'Upload failed');
         }
       } else {
-        ToastMessage.showError(context, 'Upload failed: ${response.statusCode}');
+        String msg = 'Upload failed (${response.statusCode})';
+        try {
+          final decoded = jsonDecode(responseBody);
+          if (decoded is Map && decoded['error'] != null) {
+            msg = decoded['error'].toString();
+          }
+        } catch (_) {}
+        if (!mounted) return;
+        ToastMessage.showError(context, msg);
       }
     } catch (e) {
+      if (!mounted) return;
       ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
@@ -235,24 +257,27 @@ class _DoctorProfileState extends State<DoctorProfile> {
       return;
     }
 
-    final doctorId = authState.user!.effectiveDoctorId.toString();
+    final doctorId = authState.user!.id.toString();
     final token = authState.token!;
 
     try {
-      final response = await http.delete(
-        Uri.parse('${AppConstants.baseUrl}/api/doctor/avatar/$doctorId'),
-        headers: {'Authorization': 'Bearer $token'},
+      final url = _avatarUrl;
+      // حذف مضمون: السيرفر بيمسح الملف فعلياً (حتى لو الصورة محطوطة من الويب).
+      final ok = await ApiService.forceRemoveAvatar(
+        kind: 'doctor',
+        id: doctorId,
+        token: token,
       );
-
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data['success'] == true) {
+      if (url != null) await ProfileAvatar.evict(url);
+      _bumpAvatar();
+      if (!mounted) return;
+      if (ok) {
         ToastMessage.showSuccess(context, 'Photo removed');
-        setState(() => _avatarUrl = null);
       } else {
-        ToastMessage.showError(context, data['error'] ?? 'Failed to remove');
+        ToastMessage.showError(context, 'Failed to remove photo');
       }
     } catch (e) {
+      if (!mounted) return;
       ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
@@ -299,8 +324,8 @@ class _DoctorProfileState extends State<DoctorProfile> {
       );
     }
 
-    final displayId = isTA 
-        ? (teachingAssistant?.id.toString() ?? user.username) 
+    final displayId = isTA
+        ? (teachingAssistant?.id.toString() ?? user.username)
         : (doctor?.id.toString() ?? user.username);
     final displayName = isTA ? teachingAssistant?.name : doctor?.name ?? user.name;
     final displayUsername = user.username;
@@ -310,21 +335,23 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: dataState.loadingState.isLoading,
+        child: RefreshIndicator(
         onRefresh: _refreshProfile,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(20.r),
           child: Center(
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 600),
+              constraints: BoxConstraints(maxWidth: 600.w),
               child: Column(
                 children: [
                   // Profile Card
                   Container(
-                    padding: const EdgeInsets.all(24),
+                    padding: EdgeInsets.all(24.r),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
@@ -333,13 +360,13 @@ class _DoctorProfileState extends State<DoctorProfile> {
                             ? [const Color(0xFF059669), const Color(0xFF047857)]
                             : [const Color(0xFF0EA5E9), const Color(0xFF0284C7)],
                       ),
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(28.r),
                       boxShadow: [
                         BoxShadow(
                           color: (isTA ? const Color(0xFF059669) : const Color(0xFF0EA5E9))
                               .withValues(alpha: 0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
+                          blurRadius: 20.r,
+                          offset: Offset(0, 8.h),
                         ),
                       ],
                     ),
@@ -352,67 +379,31 @@ class _DoctorProfileState extends State<DoctorProfile> {
                             alignment: Alignment.bottomRight,
                             children: [
                               Container(
-                                width: 100,
-                                height: 100,
+                                width: 100.w,
+                                height: 100.w,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   color: Colors.white,
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withValues(alpha: 0.2),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
+                                      blurRadius: 10.r,
+                                      offset: Offset(0, 4.h),
                                     ),
                                   ],
                                 ),
-                                child: _avatarUrl != null && !_isLoadingAvatar
-                                    ? ClipOval(
-                                        child: CachedNetworkImage(
-                                          imageUrl: _avatarUrl!,
-                                          fit: BoxFit.cover,
-                                          width: 100,
-                                          height: 100,
-                                          placeholder: (context, url) => Center(
-                                            child: SizedBox(
-                                              width: 30,
-                                              height: 30,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                          errorWidget: (context, url, error) => Center(
-                                            child: Text(
-                                              displayName!.isNotEmpty
-                                                  ? displayName[0].toUpperCase()
-                                                  : '?',
-                                              style: const TextStyle(
-                                                fontSize: 40,
-                                                fontWeight: FontWeight.bold,
-                                                color: Color(0xFF0EA5E9),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    : Center(
-                                        child: Text(
-                                          displayName!.isNotEmpty
-                                              ? displayName[0].toUpperCase()
-                                              : '?',
-                                          style: TextStyle(
-                                            fontSize: 40,
-                                            fontWeight: FontWeight.bold,
-                                            color: isTA
-                                                ? const Color(0xFF059669)
-                                                : const Color(0xFF0EA5E9),
-                                          ),
-                                        ),
-                                      ),
+                                child: ProfileAvatar(
+                                  url: _avatarUrl ?? '',
+                                  name: displayName ?? '?',
+                                  size: 100.w,
+                                  backgroundColor: Colors.white,
+                                  initialColor: isTA
+                                      ? const Color(0xFF059669)
+                                      : const Color(0xFF0EA5E9),
+                                ),
                               ),
                               Container(
-                                padding: const EdgeInsets.all(6),
+                                padding: EdgeInsets.all(6.r),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   shape: BoxShape.circle,
@@ -428,47 +419,47 @@ class _DoctorProfileState extends State<DoctorProfile> {
                                   color: isTA
                                       ? const Color(0xFF059669)
                                       : const Color(0xFF0EA5E9),
-                                  size: 14,
+                                  size: 14.sp,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        SizedBox(height: 16.h),
                         Text(
                           displayName!,
-                          style: const TextStyle(
-                            fontSize: 24,
+                          style: TextStyle(
+                            fontSize: 24.sp,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                           ),
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: 4.h),
                         Text(
                           'ID: $displayId',
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: 14.sp,
                             color: Colors.white.withValues(alpha: 0.8),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        SizedBox(height: 12.h),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 6),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 16.w, vertical: 6.h),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20.r),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(roleIcon, size: 14, color: Colors.white),
-                              const SizedBox(width: 6),
+                              Icon(roleIcon, size: 14.sp, color: Colors.white),
+                              SizedBox(width: 6.w),
                               Text(
                                 role,
-                                style: const TextStyle(
-                                  fontSize: 12,
+                                style: TextStyle(
+                                  fontSize: 12.sp,
                                   fontWeight: FontWeight.w600,
                                   color: Colors.white,
                                 ),
@@ -476,26 +467,26 @@ class _DoctorProfileState extends State<DoctorProfile> {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        SizedBox(height: 12.h),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 12.w, vertical: 4.h),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20.r),
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.5),
                             ),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.circle, size: 7, color: Color(0xFF34D399)),
-                              SizedBox(width: 4),
+                              Icon(Icons.circle, size: 7.sp, color: const Color(0xFF34D399)),
+                              SizedBox(width: 4.w),
                               Text(
                                 'Active',
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 11.sp,
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -507,7 +498,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  SizedBox(height: 20.h),
 
                   // Username Card (Full Width)
                   _buildInfoCard(
@@ -518,7 +509,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     isDark: isDark,
                   ),
 
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12.h),
 
                   // Email Card (Full Width)
                   _buildInfoCard(
@@ -529,7 +520,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     isDark: isDark,
                   ),
 
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12.h),
 
                   // ID Number and Member Since in Row
                   Row(
@@ -543,7 +534,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                           isDark: isDark,
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      SizedBox(width: 12.w),
                       Expanded(
                         child: _buildInfoCard(
                           icon: Icons.calendar_today,
@@ -556,7 +547,7 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     ],
                   ),
 
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12.h),
 
                   if (isTA && teachingAssistant?.supervisorDoctorId != null)
                     _buildInfoCard(
@@ -567,12 +558,35 @@ class _DoctorProfileState extends State<DoctorProfile> {
                       isDark: isDark,
                     ),
 
-                  const SizedBox(height: 80),
+                  SizedBox(height: 20.h),
+
+                  // TA Management (Doctors only)
+                  if (!isTA) ...[
+                    _buildActionTile(
+                      icon: Icons.shield_outlined,
+                      label: 'TA Management',
+                      color: const Color(0xFF0EA5E9),
+                      isDark: isDark,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DoctorTAManagement(),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 12.h),
+                  ],
+
+                  // Logout button
+                  _buildLogoutButton(isDark),
+
+                  SizedBox(height: 80.h),
                 ],
               ),
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -585,10 +599,10 @@ class _DoctorProfileState extends State<DoctorProfile> {
     required bool isDark,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16.r),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         border: Border.all(
           color: isDark
               ? Colors.white.withValues(alpha: 0.1)
@@ -601,19 +615,19 @@ class _DoctorProfileState extends State<DoctorProfile> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(8.r),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(10.r),
                 ),
-                child: Icon(icon, size: 16, color: color),
+                child: Icon(icon, size: 16.sp, color: color),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10.w),
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     fontWeight: FontWeight.w600,
                     color: isDark
                         ? const Color(0xFF94A3B8)
@@ -624,16 +638,152 @@ class _DoctorProfileState extends State<DoctorProfile> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8.h),
           Text(
             value,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 14.sp,
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : const Color(0xFF1E293B),
             ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Theme.of(context).cardColor,
+      borderRadius: BorderRadius.circular(20.r),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20.r),
+        child: Container(
+          padding: EdgeInsets.all(16.r),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20.r),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : Colors.grey.shade200,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(8.r),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10.r),
+                ),
+                child: Icon(icon, size: 18.sp, color: color),
+              ),
+              SizedBox(width: 12.w),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 20.sp,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.3)
+                    : Colors.grey.shade400,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton(bool isDark) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () => _showLogoutDialog(isDark),
+        icon: Icon(Icons.logout_rounded, size: 20.sp),
+        label: Text(
+          'Logout',
+          style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w600),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.redAccent,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: 14.h),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.r),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLogoutDialog(bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24.r),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: Colors.redAccent, size: 28.sp),
+            SizedBox(width: 12.w),
+            Text(
+              'Logout',
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF1E293B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              foregroundColor:
+                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            ),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.read<AuthCubit>().logout();
+              context.read<DataCubit>().clearData();
+              WebSocketService.instance.disconnect();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12.r)),
+            ),
+            child: const Text('Logout'),
           ),
         ],
       ),

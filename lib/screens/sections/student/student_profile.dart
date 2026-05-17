@@ -4,16 +4,20 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../widgets/toast_message.dart';
+import '../../../widgets/profile_avatar.dart';
+import '../../../widgets/app_skeleton.dart';
 import '../../../core/api_service.dart';
 import '../../../core/constants.dart';
 import '../../../core/helpers.dart';
+import '../../../services/websocket_service.dart';
 
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});
@@ -38,18 +42,45 @@ class _StudentProfileState extends State<StudentProfile> {
   String? _qrCodeData;
   bool _isLoadingQR = false;
 
-  // Profile Image (من السيرفر)
-  String? _avatarUrl;
-  bool _isLoadingAvatar = false;
+  // Profile Image (من السيرفر، مع كاش)
   final ImagePicker _imagePicker = ImagePicker();
 
   // Refresh
   bool _isRefreshing = false;
 
+  /// رقم الطالب (student_id) — من الـ user أو من قائمة الطلاب كـ fallback.
+  String? get _studentId {
+    final user = context.read<AuthCubit>().state.user;
+    if (user == null) return null;
+    if (user.username.trim().isNotEmpty) return user.username.trim();
+    // fallback لو الجلسة قديمة والـ username فاضي
+    final students = context.read<DataCubit>().state.students;
+    final s = findStudentSafely(
+        userId: user.id, username: user.username, students: students);
+    return s?.studentId;
+  }
+
+  /// نسخة الصورة — بتتغيّر مع كل فتح للصفحة/رفع/حذف، فالكاش بيتجدّد
+  /// أوتوماتيك (cache-busting) من غير ما الصورة القديمة تفضل عالقة.
+  int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
+
+  /// رابط صورة الطالب على السيرفر (مع نسخة عشان المزامنة مع الويب).
+  String? get _avatarUrl {
+    final id = _studentId;
+    if (id == null || id.isEmpty) return null;
+    return '${AppConstants.baseUrl}/api/student/avatar/$id?v=$_avatarVersion';
+  }
+
+  /// يجدّد نسخة الصورة → CachedNetworkImage يجيب أحدث صورة من السيرفر.
+  void _bumpAvatar() {
+    if (mounted) {
+      setState(() => _avatarVersion = DateTime.now().millisecondsSinceEpoch);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadAvatar();
   }
 
   @override
@@ -66,7 +97,8 @@ class _StudentProfileState extends State<StudentProfile> {
 
     try {
       await context.read<DataCubit>().loadAllData();
-      await _loadAvatar();
+      // مزامنة مع الويب: نجدّد نسخة الصورة فبتتجاب من السيرفر من جديد.
+      _bumpAvatar();
     } catch (e) {
       print('Error refreshing profile: $e');
     } finally {
@@ -76,78 +108,39 @@ class _StudentProfileState extends State<StudentProfile> {
     }
   }
 
-  // ============================================
-  // Avatar Methods (Server-side with Cache)
-  // ============================================
-
-  Future<void> _loadAvatar() async {
-    final authState = context.read<AuthCubit>().state;
-    if (authState.user == null) return;
-    
-    final studentId = authState.user!.username;
-    final token = authState.token;
-    
-    if (token == null) return;
-    
-    setState(() => _isLoadingAvatar = true);
-    
-    try {
-      final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
-      
-      if (response.statusCode == 200) {
-        setState(() {
-          // ✅ إضافة timestamp عشان مايتكاشش، بس cached_network_image هيعتني بالـ cache
-          _avatarUrl = '${AppConstants.baseUrl}/api/student/avatar/$studentId';
-        });
-      } else if (response.statusCode == 404) {
-        setState(() => _avatarUrl = null);
-      }
-    } catch (e) {
-      print('Error loading avatar: $e');
-      setState(() => _avatarUrl = null);
-    } finally {
-      if (mounted) setState(() => _isLoadingAvatar = false);
-    }
-  }
-
   void _showImageOptions() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
       ),
       builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: EdgeInsets.symmetric(vertical: 16.h),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 48,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
+                width: 48.w,
+                height: 4.h,
+                margin: EdgeInsets.only(bottom: 16.h),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade400,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(4.r),
                 ),
               ),
               Text(
                 'Profile Photo',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 18.sp,
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : const Color(0xFF1E293B),
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16.h),
 
               _buildImageOptionTile(
                 icon: Icons.camera_alt_rounded,
@@ -180,7 +173,7 @@ class _StudentProfileState extends State<StudentProfile> {
                   },
                 ),
 
-              const SizedBox(height: 8),
+              SizedBox(height: 8.h),
             ],
           ),
         ),
@@ -197,17 +190,17 @@ class _StudentProfileState extends State<StudentProfile> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: Container(
-        padding: const EdgeInsets.all(10),
+        padding: EdgeInsets.all(10.r),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12.r),
         ),
-        child: Icon(icon, color: color, size: 22),
+        child: Icon(icon, color: color, size: 22.sp),
       ),
       title: Text(
         label,
         style: TextStyle(
-          fontSize: 15,
+          fontSize: 15.sp,
           fontWeight: FontWeight.w500,
           color: isDark ? Colors.white : const Color(0xFF1E293B),
         ),
@@ -222,10 +215,14 @@ class _StudentProfileState extends State<StudentProfile> {
       ToastMessage.showError(context, 'Not authenticated');
       return;
     }
-    
-    final studentId = authState.user!.username;
+
+    final studentId = _studentId;
+    if (studentId == null || studentId.isEmpty) {
+      ToastMessage.showError(context, 'Student ID not found');
+      return;
+    }
     final token = authState.token!;
-    
+
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: source,
@@ -235,33 +232,67 @@ class _StudentProfileState extends State<StudentProfile> {
       );
 
       if (pickedFile == null) return;
-      
+      if (!mounted) return;
+
       ToastMessage.showInfo(context, 'Uploading...');
-      
+
+      // نوع الصورة لازم يتبعت صريح — من غيره السيرفر بيرفض الملف ويرجّع 500
+      final lower = pickedFile.path.toLowerCase();
+      String ext = 'jpg', subtype = 'jpeg';
+      if (lower.endsWith('.png')) {
+        ext = 'png';
+        subtype = 'png';
+      } else if (lower.endsWith('.gif')) {
+        ext = 'gif';
+        subtype = 'gif';
+      } else if (lower.endsWith('.webp')) {
+        ext = 'webp';
+        subtype = 'webp';
+      }
+
       final request = http.MultipartRequest(
         'POST',
         Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
       );
-      
+
       request.headers['Authorization'] = 'Bearer $token';
-      request.files.add(await http.MultipartFile.fromPath('avatar', pickedFile.path));
-      
+      request.files.add(await http.MultipartFile.fromPath(
+        'avatar',
+        pickedFile.path,
+        filename: 'avatar.$ext',
+        contentType: MediaType('image', subtype),
+      ));
+
       final response = await request.send();
-      
+      final responseBody = await response.stream.bytesToString();
+
       if (response.statusCode == 200) {
-        final responseData = await response.stream.bytesToString();
-        final data = jsonDecode(responseData);
-        
+        final data = jsonDecode(responseBody);
+
         if (data['success'] == true) {
+          // نجدّد النسخة عشان الصورة الجديدة تظهر فوراً.
+          final url = _avatarUrl;
+          if (url != null) await ProfileAvatar.evict(url);
+          _bumpAvatar();
+          if (!mounted) return;
           ToastMessage.showSuccess(context, 'Profile photo updated!');
-          await _loadAvatar();
         } else {
+          if (!mounted) return;
           ToastMessage.showError(context, data['error'] ?? 'Upload failed');
         }
       } else {
-        ToastMessage.showError(context, 'Upload failed: ${response.statusCode}');
+        String msg = 'Upload failed (${response.statusCode})';
+        try {
+          final decoded = jsonDecode(responseBody);
+          if (decoded is Map && decoded['error'] != null) {
+            msg = decoded['error'].toString();
+          }
+        } catch (_) {}
+        if (!mounted) return;
+        ToastMessage.showError(context, msg);
       }
     } catch (e) {
+      if (!mounted) return;
       ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
@@ -272,27 +303,32 @@ class _StudentProfileState extends State<StudentProfile> {
       ToastMessage.showError(context, 'Not authenticated');
       return;
     }
-    
-    final studentId = authState.user!.username;
+
+    final studentId = _studentId;
+    if (studentId == null || studentId.isEmpty) {
+      ToastMessage.showError(context, 'Student ID not found');
+      return;
+    }
     final token = authState.token!;
-    
+
     try {
-      final response = await http.delete(
-        Uri.parse('${AppConstants.baseUrl}/api/student/avatar/$studentId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
+      final url = _avatarUrl;
+      // حذف مضمون: السيرفر بيمسح الملف فعلياً (حتى لو الصورة محطوطة من الويب).
+      final ok = await ApiService.forceRemoveAvatar(
+        kind: 'student',
+        id: studentId,
+        token: token,
       );
-      
-      final data = jsonDecode(response.body);
-      
-      if (response.statusCode == 200 && data['success'] == true) {
+      if (url != null) await ProfileAvatar.evict(url);
+      _bumpAvatar();
+      if (!mounted) return;
+      if (ok) {
         ToastMessage.showSuccess(context, 'Photo removed');
-        setState(() => _avatarUrl = null);
       } else {
-        ToastMessage.showError(context, data['error'] ?? 'Failed to remove');
+        ToastMessage.showError(context, 'Failed to remove photo');
       }
     } catch (e) {
+      if (!mounted) return;
       ToastMessage.showError(context, 'Error: ${e.toString()}');
     }
   }
@@ -466,21 +502,23 @@ class _StudentProfileState extends State<StudentProfile> {
             students: dataState.students)
         : null;
 
-    return RefreshIndicator(
+    return AppSkeleton(
+      enabled: dataState.loadingState.isLoading,
+      child: RefreshIndicator(
       onRefresh: _refreshProfile,
       color: Theme.of(context).primaryColor,
       backgroundColor: Theme.of(context).cardColor,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(20.r),
         child: Center(
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
+            constraints: BoxConstraints(maxWidth: 600.w),
             child: Column(
               children: [
                 // ===== Profile Card =====
                 Container(
-                  padding: const EdgeInsets.all(24),
+                  padding: EdgeInsets.all(24.r),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
@@ -490,7 +528,7 @@ class _StudentProfileState extends State<StudentProfile> {
                         Theme.of(context).cardColor,
                       ],
                     ),
-                    borderRadius: BorderRadius.circular(24),
+                    borderRadius: BorderRadius.circular(24.r),
                     border: Border.all(
                         color: isDark
                             ? Colors.white.withValues(alpha: 0.1)
@@ -503,57 +541,15 @@ class _StudentProfileState extends State<StudentProfile> {
                         child: Stack(
                           alignment: Alignment.bottomRight,
                           children: [
-                            Container(
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.grey.shade300,
-                              ),
-                              child: _avatarUrl != null && !_isLoadingAvatar
-                                  ? ClipOval(
-                                      child: CachedNetworkImage(
-                                        imageUrl: _avatarUrl!,
-                                        fit: BoxFit.cover,
-                                        width: 100,
-                                        height: 100,
-                                        placeholder: (context, url) => Center(
-                                          child: SizedBox(
-                                            width: 30,
-                                            height: 30,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Theme.of(context).primaryColor,
-                                            ),
-                                          ),
-                                        ),
-                                        errorWidget: (context, url, error) => Center(
-                                          child: Text(
-                                            (student?.name.isNotEmpty ?? false)
-                                                ? student!.name[0].toUpperCase()
-                                                : 'S',
-                                            style: const TextStyle(
-                                                fontSize: 40,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                  : Center(
-                                      child: Text(
-                                        (student?.name.isNotEmpty ?? false)
-                                            ? student!.name[0].toUpperCase()
-                                            : 'S',
-                                        style: const TextStyle(
-                                            fontSize: 40,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white),
-                                      ),
-                                    ),
+                            ProfileAvatar(
+                              url: _avatarUrl ?? '',
+                              name: student?.name ?? user?.name ?? 'S',
+                              size: 100.w,
+                              backgroundColor: Colors.grey.shade300,
+                              initialColor: Colors.white,
                             ),
                             Container(
-                              padding: const EdgeInsets.all(6),
+                              padding: EdgeInsets.all(6.r),
                               decoration: BoxDecoration(
                                 color: Theme.of(context).primaryColor,
                                 shape: BoxShape.circle,
@@ -561,28 +557,28 @@ class _StudentProfileState extends State<StudentProfile> {
                                     color: Theme.of(context).cardColor,
                                     width: 3),
                               ),
-                              child: const Icon(Icons.camera_alt,
-                                  color: Colors.white, size: 14),
+                              child: Icon(Icons.camera_alt,
+                                  color: Colors.white, size: 14.sp),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16.h),
                       Text(student?.name ?? user?.name ?? 'Student',
-                          style: const TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
+                          style: TextStyle(
+                              fontSize: 22.sp, fontWeight: FontWeight.bold)),
+                      SizedBox(height: 4.h),
                       Text(student?.studentId ?? user?.username ?? '',
                           style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 14.sp,
                               color: Theme.of(context).hintColor)),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16.h),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           _buildInfoChip(
                               Icons.school, 'Level ${student?.level ?? '?'}'),
-                          const SizedBox(width: 12),
+                          SizedBox(width: 12.w),
                           _buildInfoChip(
                               Icons.apartment, student?.department ?? 'N/A'),
                         ],
@@ -590,7 +586,7 @@ class _StudentProfileState extends State<StudentProfile> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: 20.h),
 
                 // ===== QR Code Section =====
                 _buildSectionCard(
@@ -602,22 +598,22 @@ class _StudentProfileState extends State<StudentProfile> {
                           _qrCodeData != null &&
                           _qrCodeData!.isNotEmpty) ...[
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.all(16.r),
                           decoration: BoxDecoration(
                               color: Colors.white,
-                              borderRadius: BorderRadius.circular(16)),
+                              borderRadius: BorderRadius.circular(16.r)),
                           child: QrImageView(
                               data: _qrCodeData!,
                               version: QrVersions.auto,
-                              size: 200),
+                              size: 200.w),
                         ),
-                        const SizedBox(height: 12),
+                        SizedBox(height: 12.h),
                         TextButton.icon(
                           onPressed: () => setState(() {
                             _showQRCode = false;
                             _qrCodeData = null;
                           }),
-                          icon: const Icon(Icons.close, size: 18),
+                          icon: Icon(Icons.close, size: 18.sp),
                           label: const Text('Hide QR Code'),
                         ),
                       ] else
@@ -626,26 +622,26 @@ class _StudentProfileState extends State<StudentProfile> {
                           child: ElevatedButton.icon(
                             onPressed: _isLoadingQR ? null : _loadQRCode,
                             icon: _isLoadingQR
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
+                                ? SizedBox(
+                                    width: 16.w,
+                                    height: 16.w,
+                                    child: const CircularProgressIndicator(
                                         strokeWidth: 2, color: Colors.white))
                                 : const Icon(Icons.qr_code),
                             label: Text(
                                 _isLoadingQR ? 'Loading...' : 'Show QR Code'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Theme.of(context).primaryColor,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              padding: EdgeInsets.symmetric(vertical: 14.h),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
+                                  borderRadius: BorderRadius.circular(14.r)),
                             ),
                           ),
                         ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: 20.h),
 
                 // ===== Change Password Section =====
                 _buildSectionCard(
@@ -662,9 +658,9 @@ class _StudentProfileState extends State<StudentProfile> {
                             icon: const Icon(Icons.edit),
                             label: const Text('Change Password'),
                             style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              padding: EdgeInsets.symmetric(vertical: 14.h),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
+                                  borderRadius: BorderRadius.circular(14.r)),
                               side: BorderSide(
                                   color: Theme.of(context)
                                       .primaryColor
@@ -680,19 +676,19 @@ class _StudentProfileState extends State<StudentProfile> {
                                 _currentPasswordController,
                                 _obscureCurrent,
                                 (v) => setState(() => _obscureCurrent = v)),
-                            const SizedBox(height: 12),
+                            SizedBox(height: 12.h),
                             _buildPasswordField(
                                 'New Password',
                                 _newPasswordController,
                                 _obscureNew,
                                 (v) => setState(() => _obscureNew = v)),
-                            const SizedBox(height: 12),
+                            SizedBox(height: 12.h),
                             _buildPasswordField(
                                 'Confirm Password',
                                 _confirmPasswordController,
                                 _obscureConfirm,
                                 (v) => setState(() => _obscureConfirm = v)),
-                            const SizedBox(height: 16),
+                            SizedBox(height: 16.h),
                             Row(
                               children: [
                                 Expanded(
@@ -700,15 +696,15 @@ class _StudentProfileState extends State<StudentProfile> {
                                     onPressed: () => setState(
                                         () => _showPasswordFields = false),
                                     style: OutlinedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 14),
+                                        padding: EdgeInsets.symmetric(
+                                            vertical: 14.h),
                                         shape: RoundedRectangleBorder(
                                             borderRadius:
-                                                BorderRadius.circular(14))),
+                                                BorderRadius.circular(14.r))),
                                     child: const Text('Cancel'),
                                   ),
                                 ),
-                                const SizedBox(width: 12),
+                                SizedBox(width: 12.w),
                                 Expanded(
                                   child: ElevatedButton(
                                     onPressed: _isChangingPassword
@@ -717,17 +713,17 @@ class _StudentProfileState extends State<StudentProfile> {
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor:
                                           Theme.of(context).primaryColor,
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 14),
+                                      padding: EdgeInsets.symmetric(
+                                          vertical: 14.h),
                                       shape: RoundedRectangleBorder(
                                           borderRadius:
-                                              BorderRadius.circular(14)),
+                                              BorderRadius.circular(14.r)),
                                     ),
                                     child: _isChangingPassword
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
+                                        ? SizedBox(
+                                            width: 20.w,
+                                            height: 20.w,
+                                            child: const CircularProgressIndicator(
                                                 strokeWidth: 2,
                                                 color: Colors.white))
                                         : const Text('Update'),
@@ -740,11 +736,95 @@ class _StudentProfileState extends State<StudentProfile> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 80),
+                SizedBox(height: 20.h),
+
+                // ===== Logout Button =====
+                _buildLogoutButton(isDark),
+
+                SizedBox(height: 80.h),
               ],
             ),
           ),
         ),
+      ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton(bool isDark) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () => _showLogoutDialog(isDark),
+        icon: Icon(Icons.logout_rounded, size: 20.sp),
+        label: Text(
+          'Logout',
+          style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w600),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.redAccent,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: 14.h),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.r),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLogoutDialog(bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24.r),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: Colors.redAccent, size: 28.sp),
+            SizedBox(width: 12.w),
+            Text(
+              'Logout',
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF1E293B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              foregroundColor:
+                  isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            ),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.read<AuthCubit>().logout();
+              context.read<DataCubit>().clearData();
+              WebSocketService.instance.disconnect();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12.r)),
+            ),
+            child: const Text('Logout'),
+          ),
+        ],
       ),
     );
   }
@@ -755,19 +835,19 @@ class _StudentProfileState extends State<StudentProfile> {
 
   Widget _buildInfoChip(IconData icon, String label) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
       decoration: BoxDecoration(
         color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: Theme.of(context).primaryColor),
-          const SizedBox(width: 6),
+          Icon(icon, size: 14.sp, color: Theme.of(context).primaryColor),
+          SizedBox(width: 6.w),
           Text(label,
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 12.sp,
                   color: Theme.of(context).primaryColor,
                   fontWeight: FontWeight.w500)),
         ],
@@ -779,10 +859,10 @@ class _StudentProfileState extends State<StudentProfile> {
       {required IconData icon, required String title, required Widget child}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(20.r),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         border: Border.all(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.1)
@@ -792,13 +872,13 @@ class _StudentProfileState extends State<StudentProfile> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Icon(icon, color: Theme.of(context).primaryColor, size: 20),
-            const SizedBox(width: 10),
+            Icon(icon, color: Theme.of(context).primaryColor, size: 20.sp),
+            SizedBox(width: 10.w),
             Text(title,
                 style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold)),
           ]),
-          const SizedBox(height: 16),
+          SizedBox(height: 16.h),
           child,
         ],
       ),
@@ -814,7 +894,7 @@ class _StudentProfileState extends State<StudentProfile> {
         labelText: label,
         suffixIcon: IconButton(
           icon:
-              Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20),
+              Icon(obscure ? Icons.visibility_off : Icons.visibility, size: 20.sp),
           onPressed: () => onToggle(!obscure),
         ),
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 class ToastMessage {
   static void showSuccess(BuildContext context, String message) {
@@ -18,14 +19,14 @@ class ToastMessage {
       SnackBar(
         content: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 20),
-            const SizedBox(width: 12),
+            Icon(icon, color: Colors.white, size: 20.sp),
+            SizedBox(width: 12.w),
             Expanded(child: Text(message)),
           ],
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
         duration: const Duration(seconds: 3),
       ),
     );

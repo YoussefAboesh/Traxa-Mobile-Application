@@ -1,5 +1,6 @@
 // lib/services/cache_service.dart
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CacheService {
@@ -22,17 +23,24 @@ class CacheService {
     await prefs.setString(_cacheSubjectsKey, jsonEncode(subjects));
     await prefs.setString(_cacheLecturesKey, jsonEncode(lectures));
     await prefs.setString(_cacheTimestampKey, DateTime.now().toIso8601String());
-    print('💾 Data cached successfully');
+    if (kDebugMode) debugPrint('💾 Data cached successfully');
   }
 
-  static Future<Map<String, List<dynamic>>?> loadAllData() async {
+  /// Loads the cached snapshot.
+  ///
+  /// When [ignoreExpiry] is false (default) a snapshot older than
+  /// [_cacheMaxAge] is treated as stale and `null` is returned. Pass
+  /// `ignoreExpiry: true` for the offline fallback, where showing stale
+  /// data is better than showing nothing.
+  static Future<Map<String, List<dynamic>>?> loadAllData(
+      {bool ignoreExpiry = false}) async {
     final prefs = await SharedPreferences.getInstance();
 
     final timestampStr = prefs.getString(_cacheTimestampKey);
-    if (timestampStr != null) {
+    if (!ignoreExpiry && timestampStr != null) {
       final timestamp = DateTime.parse(timestampStr);
       if (DateTime.now().difference(timestamp) > _cacheMaxAge) {
-        print('📦 Cache expired');
+        if (kDebugMode) debugPrint('📦 Cache expired');
         return null;
       }
     }
@@ -64,6 +72,6 @@ class CacheService {
     await prefs.remove(_cacheSubjectsKey);
     await prefs.remove(_cacheLecturesKey);
     await prefs.remove(_cacheTimestampKey);
-    print('🗑️ Cache cleared');
+    if (kDebugMode) debugPrint('🗑️ Cache cleared');
   }
 }

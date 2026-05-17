@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:traxa_mobile/core/theme.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
@@ -11,6 +12,7 @@ import '../../../models/subject.dart';
 import '../../../models/teaching_assistant.dart';
 import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
+import '../../../widgets/app_skeleton.dart';
 import '../../../core/api_service.dart';
 
 class DoctorTAManagement extends StatefulWidget {
@@ -23,19 +25,29 @@ class DoctorTAManagement extends StatefulWidget {
 class _DoctorTAManagementState extends State<DoctorTAManagement> {
   bool _loading = true;
   StreamSubscription? _wsSub;
+  StreamSubscription? _dataSub;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    // أي تغيير في صلاحيات المعيدين على الويب → إعادة تحميل.
     _wsSub = WebSocketService.instance.taPermissionsStream.listen((_) {
       if (mounted) _loadData();
+    });
+    // أي تعيين/إلغاء معيد لمادة على الويب → إعادة تحميل.
+    _dataSub = WebSocketService.instance.dataChangeStream.listen((data) {
+      final entity = data['entity'] as String?;
+      if (mounted && (entity == 'subject' || entity == 'teaching-assistant')) {
+        _loadData();
+      }
     });
   }
 
   @override
   void dispose() {
     _wsSub?.cancel();
+    _dataSub?.cancel();
     super.dispose();
   }
 
@@ -57,14 +69,20 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
   /// P1 → subject.taId يطابق ta.id في tas list
   /// P2 → assignedSubjectIds
   TeachingAssistant? _resolveTA(Subject subject, List<TeachingAssistant> tas) {
-    // P0: الـ subject عنده ta_id + ta_name من /api/subjects مباشرة
+    // P0: الـ subject عنده ta_id + ta_name جاهزين من /api/subjects-public
+    final taName = subject.taName?.trim();
     if (subject.taId != null &&
-        subject.taName != null &&
-        subject.taName!.isNotEmpty) {
+        taName != null &&
+        taName.isNotEmpty &&
+        taName.toLowerCase() != 'not assigned') {
+      // Prefer the full record from the TA list (has username/email),
+      // otherwise build a lightweight one from the enriched subject.
+      final match = tas.where((t) => t.id == subject.taId).toList();
+      if (match.isNotEmpty) return match.first;
       return TeachingAssistant(
         id: subject.taId!,
-        name: subject.taName!,
-        username: subject.taName!,
+        name: taName,
+        username: taName,
         assignedSubjectIds: [subject.id],
       );
     }
@@ -110,7 +128,7 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
             _buildTopBar(isDark, currentSemester),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const SkeletonCardList()
                   : RefreshIndicator(
                       onRefresh: _loadData,
                       child: subjects.isEmpty
@@ -128,18 +146,18 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
 
   Widget _buildTopBar(bool isDark, int currentSemester) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 14, 16, 12),
+      padding: EdgeInsets.fromLTRB(12.w, 14.h, 16.w, 12.h),
       child: Row(
         children: [
           GestureDetector(
             onTap: () => Navigator.of(context).maybePop(),
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: EdgeInsets.all(8.r),
               decoration: BoxDecoration(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.07)
                     : Colors.white,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(12.r),
                 border: Border.all(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.1)
@@ -150,32 +168,32 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
                     : [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
+                          blurRadius: 6.r,
+                          offset: Offset(0, 2.h),
                         ),
                       ],
               ),
               child: Icon(Icons.arrow_back_ios_new_rounded,
-                  size: 16,
+                  size: 16.sp,
                   color:
                       isDark ? Colors.white70 : const Color(0xFF1E293B)),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12.w),
           Container(
-            padding: const EdgeInsets.all(9),
+            padding: EdgeInsets.all(9.r),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
                 colors: [Color(0xFF06B6D4), Color(0xFF0EA5E9)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(13.r),
             ),
-            child: const Icon(Icons.people_alt_rounded,
-                color: Colors.white, size: 18),
+            child: Icon(Icons.people_alt_rounded,
+                color: Colors.white, size: 18.sp),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10.w),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,7 +201,7 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
                 Text(
                   'Subjects & Teaching Assistants',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 15.sp,
                     fontWeight: FontWeight.bold,
                     color: isDark
                         ? Colors.white
@@ -193,7 +211,7 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
                 Text(
                   'Manage TA assignments and permissions for each subject',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     color: isDark
                         ? const Color(0xFF64748B)
                         : Colors.grey.shade500,
@@ -203,12 +221,12 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 5),
+            padding: EdgeInsets.symmetric(
+                horizontal: 10.w, vertical: 5.h),
             decoration: BoxDecoration(
               color:
                   const Color(0xFF8B5CF6).withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10.r),
               border: Border.all(
                 color: const Color(0xFF8B5CF6)
                     .withValues(alpha: 0.3),
@@ -216,10 +234,10 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
             ),
             child: Text(
               'Semester $currentSemester',
-              style: const TextStyle(
-                fontSize: 11,
+              style: TextStyle(
+                fontSize: 11.sp,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF8B5CF6),
+                color: const Color(0xFF8B5CF6),
               ),
             ),
           ),
@@ -234,17 +252,17 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        const SizedBox(height: 120),
+        SizedBox(height: 120.h),
         Icon(Icons.assignment_late_outlined,
-            size: 64,
+            size: 64.sp,
             color:
                 isDark ? Colors.white24 : Colors.grey.shade300),
-        const SizedBox(height: 14),
+        SizedBox(height: 14.h),
         Center(
           child: Text(
             'No subjects found for Semester $semester',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 14.sp,
               color:
                   isDark ? Colors.white38 : Colors.grey.shade500,
             ),
@@ -263,11 +281,11 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
   ) {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 28),
+      padding: EdgeInsets.fromLTRB(14.w, 4.h, 14.w, 28.h),
       child: Container(
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E293B) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(20.r),
           border: Border.all(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.08)
@@ -278,13 +296,13 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
               : [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+                    blurRadius: 16.r,
+                    offset: Offset(0, 4.h),
                   ),
                 ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(20.r),
           child: Column(
             children: [
               _buildTableHeader(isDark),
@@ -306,7 +324,7 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
   Widget _buildTableHeader(bool isDark) {
     return Container(
       padding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          EdgeInsets.symmetric(horizontal: 14.w, vertical: 13.h),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -315,33 +333,35 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
           ],
         ),
       ),
-      child: const Row(
+      child: Row(
         children: [
           Expanded(
-            flex: 5,
+            flex: 6,
             child: Text('SUBJECT',
                 style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     fontWeight: FontWeight.w800,
                     color: Colors.white70,
                     letterSpacing: 1)),
           ),
-          SizedBox(
-            width: 86,
+          SizedBox(width: 8.w),
+          Expanded(
+            flex: 4,
             child: Text('ASSIGNED TA',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     fontWeight: FontWeight.w800,
                     color: Colors.white70,
                     letterSpacing: 1)),
           ),
+          SizedBox(width: 8.w),
           SizedBox(
-            width: 106,
-            child: Text('TA PERMISSIONS',
+            width: 104.w,
+            child: Text('PERMISSIONS',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     fontWeight: FontWeight.w800,
                     color: Colors.white70,
                     letterSpacing: 1)),
@@ -362,7 +382,7 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
 
     return Container(
       padding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          EdgeInsets.symmetric(horizontal: 9.w, vertical: 14.h),
       decoration: BoxDecoration(
         border: isLast
             ? null
@@ -379,24 +399,26 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
         children: [
           // Subject
           Expanded(
-            flex: 5,
+            flex: 6,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   subject.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 13.sp,
                     fontWeight: FontWeight.w600,
                     color: isDark
                         ? Colors.white
                         : const Color(0xFF1E293B),
                   ),
                 ),
-                const SizedBox(height: 5),
+                SizedBox(height: 6.h),
                 Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
+                  spacing: 4.w,
+                  runSpacing: 4.h,
                   children: [
                     if (subject.code != null)
                       _MiniChip(
@@ -418,19 +440,22 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
             ),
           ),
 
+          SizedBox(width: 8.w),
+
           // Assigned TA
-          SizedBox(
-            width: 86,
-            child: Center(
+          Expanded(
+            flex: 6,
+            child: Align(
+              alignment: Alignment.center,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 5),
+                padding: EdgeInsets.symmetric(
+                    horizontal: 5.w, vertical: 6.h),
                 decoration: BoxDecoration(
                   color: hasTA
                       ? const Color(0xFF10B981)
                           .withValues(alpha: 0.13)
                       : Colors.grey.withValues(alpha: 0.13),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(10.r),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -439,17 +464,17 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
                       hasTA
                           ? Icons.person_rounded
                           : Icons.person_off_rounded,
-                      size: 12,
+                      size: 13.sp,
                       color: hasTA
                           ? const Color(0xFF10B981)
                           : Colors.grey,
                     ),
-                    const SizedBox(width: 4),
+                    SizedBox(width: 5.w),
                     Flexible(
                       child: Text(
                         hasTA ? assignedTA.name : 'None',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 10.5.sp,
                           fontWeight: FontWeight.w600,
                           color: hasTA
                               ? const Color(0xFF10B981)
@@ -465,27 +490,28 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
             ),
           ),
 
+          SizedBox(width: 8.w),
+
           // Set Permissions
           SizedBox(
-            width: 106,
-            child: Center(
-              child: ElevatedButton.icon(
-                onPressed: () =>
-                    _openSheet(subject, assignedTA, isDark),
-                icon: const Icon(Icons.tune_rounded, size: 12),
-                label: const Text('Set Permissions',
-                    style: TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B5CF6),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 9),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
+            width: 104.w,
+            child: ElevatedButton.icon(
+              onPressed: () => _openSheet(subject, assignedTA, isDark),
+              icon: Icon(Icons.tune_rounded, size: 13.sp),
+              label: Text('Permissions',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 10.sp,
+                      fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8B5CF6),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: EdgeInsets.symmetric(
+                    horizontal: 6.w, vertical: 10.h),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10.r)),
               ),
             ),
           ),
@@ -542,7 +568,9 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
   bool _canManageGrades = true;
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _dirty = false; // فيه تعديل لسه متحفظش
   StreamSubscription? _wsSub;
+  Timer? _pollTimer;
 
   String? get _token => ApiService.getToken();
 
@@ -560,11 +588,21 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
         _load(silent: true);
       }
     });
+    // مزامنة مع الويب: نعيد جلب الصلاحيات كل 3 ثوانٍ طول ما الشيت مفتوح،
+    // فأي تغيير من الويب يظهر هنا أوتوماتيك من غير ريفريش.
+    if (widget.assignedTA != null) {
+      _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        if (mounted && !_isSaving && !_isLoading) {
+          _load(silent: true);
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
     _wsSub?.cancel();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -578,6 +616,8 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
+    // المزامنة الصامتة (polling) ماتدوسش على تعديل لسه متحفظش.
+    if (silent && _dirty) return;
     if (!silent && mounted) setState(() => _isLoading = true);
     try {
       final resp = await ApiService.getTASubjectPermissions(
@@ -585,11 +625,12 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
         widget.subject.id,
         token,
       );
-      if (mounted) {
+      if (mounted && !(silent && _dirty)) {
         setState(() {
           _canActivateSession = resp['can_activate_session'] ?? true;
           _canManageGrades = resp['can_manage_grades'] ?? true;
           _isLoading = false;
+          _dirty = false;
         });
       }
     } catch (_) {
@@ -621,6 +662,7 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       );
       if (result['success'] == true) {
         ToastMessage.showSuccess(context, 'Permissions saved successfully');
+        _dirty = false;
         widget.onSaved();
         if (mounted) Navigator.pop(context);
       } else {
@@ -653,126 +695,80 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       decoration: BoxDecoration(
         color: bg,
         borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(28)),
+            BorderRadius.vertical(top: Radius.circular(28.r)),
       ),
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24.h,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Drag handle
-          const SizedBox(height: 12),
+          SizedBox(height: 12.h),
           Container(
-            width: 40,
-            height: 4,
+            width: 40.w,
+            height: 4.h,
             decoration: BoxDecoration(
               color: isDark
                   ? Colors.white.withValues(alpha: 0.2)
                   : Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(4.r),
             ),
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: 18.h),
 
           // Header
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: EdgeInsets.all(10.r),
                   decoration: BoxDecoration(
                     color: const Color(0xFF8B5CF6)
                         .withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(13),
+                    borderRadius: BorderRadius.circular(13.r),
                   ),
-                  child: const Icon(Icons.tune_rounded,
-                      size: 22, color: Color(0xFF8B5CF6)),
+                  child: Icon(Icons.tune_rounded,
+                      size: 22.sp, color: const Color(0xFF8B5CF6)),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12.w),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('TA Permissions',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: textPrimary)),
-                      const SizedBox(height: 2),
-                      RichText(
-                        text: TextSpan(
-                          style: TextStyle(
-                              fontSize: 12, color: textSub),
-                          children: [
-                            const TextSpan(text: 'TA: '),
-                            TextSpan(
-                              text: hasTA
-                                  ? widget.assignedTA!.name
-                                  : 'None',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: hasTA
-                                    ? const Color(0xFF10B981)
-                                    : Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: Text('TA Permissions',
+                      style: TextStyle(
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                          color: textPrimary)),
                 ),
-                // Subject pill
-                Container(
-                  constraints:
-                      const BoxConstraints(maxWidth: 100),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6)
-                        .withValues(alpha: 0.13),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    widget.subject.name,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF8B5CF6)),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
+                // اسم المعيد والماده متشالوا من هنا — موجودين تحت في كارت المعلومات.
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
-                    padding: const EdgeInsets.all(6),
+                    padding: EdgeInsets.all(6.r),
                     decoration: BoxDecoration(
                       color: isDark
                           ? Colors.white.withValues(alpha: 0.07)
                           : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(9),
+                      borderRadius: BorderRadius.circular(9.r),
                     ),
                     child: Icon(Icons.close_rounded,
-                        size: 17, color: textSub),
+                        size: 17.sp, color: textSub),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14.h),
 
           // Info card
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 12),
+              padding: EdgeInsets.symmetric(
+                  horizontal: 14.w, vertical: 12.h),
               decoration: BoxDecoration(
                 color: cardBg,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(14.r),
                 border: Border.all(color: dividerColor),
               ),
               child: Column(
@@ -789,7 +785,7 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                     textPrimary: textPrimary,
                     textSub: textSub,
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8.h),
                   _InfoRow(
                     icon: Icons.menu_book_rounded,
                     iconColor: const Color(0xFF0EA5E9),
@@ -803,34 +799,34 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12.h),
 
           // Amber banner
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 13, vertical: 10),
+              padding: EdgeInsets.symmetric(
+                  horizontal: 13.w, vertical: 10.h),
               decoration: BoxDecoration(
                 color: const Color(0xFFD97706)
                     .withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(12.r),
                 border: Border.all(
                     color: const Color(0xFFD97706)
                         .withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded,
-                      size: 15, color: Color(0xFFD97706)),
-                  const SizedBox(width: 8),
+                  Icon(Icons.info_outline_rounded,
+                      size: 15.sp, color: const Color(0xFFD97706)),
+                  SizedBox(width: 8.w),
                   Expanded(
                     child: RichText(
-                      text: const TextSpan(
+                      text: TextSpan(
                         style: TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFFD97706)),
-                        children: [
+                            fontSize: 11.sp,
+                            color: const Color(0xFFD97706)),
+                        children: const [
                           TextSpan(text: 'By default everything is '),
                           TextSpan(
                               text: 'visible',
@@ -850,37 +846,41 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16.h),
 
           // Tiles
           if (_isLoading)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: CircularProgressIndicator(strokeWidth: 2),
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SkeletonCardList(
+                itemCount: 3,
+                shrinkWrap: true,
+                padding: EdgeInsets.symmetric(horizontal: 20),
+              ),
             )
           else if (!hasTA)
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 8),
+              padding: EdgeInsets.symmetric(
+                  horizontal: 20.w, vertical: 8.h),
               child: Container(
-                padding: const EdgeInsets.all(14),
+                padding: EdgeInsets.all(14.r),
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(14.r),
                   border: Border.all(
                       color:
                           Colors.orange.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        color: Colors.orange, size: 18),
-                    const SizedBox(width: 10),
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.orange, size: 18.sp),
+                    SizedBox(width: 10.w),
                     Expanded(
                       child: Text(
                         'No TA assigned to this subject yet.',
                         style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 12.sp,
                             color: Colors.orange.shade300),
                       ),
                     ),
@@ -899,12 +899,14 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               checked: !_canActivateSession,
               onTap: _isSaving
                   ? null
-                  : () => setState(() =>
-                      _canActivateSession = !_canActivateSession),
+                  : () => setState(() {
+                      _canActivateSession = !_canActivateSession;
+                      _dirty = true;
+                    }),
             ),
             Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 20),
+                  EdgeInsets.symmetric(horizontal: 20.w),
               child: Divider(height: 1, color: dividerColor),
             ),
             _PermTile(
@@ -917,16 +919,18 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               checked: !_canManageGrades,
               onTap: _isSaving
                   ? null
-                  : () => setState(
-                      () => _canManageGrades = !_canManageGrades),
+                  : () => setState(() {
+                      _canManageGrades = !_canManageGrades;
+                      _dirty = true;
+                    }),
             ),
           ],
 
-          const SizedBox(height: 20),
+          SizedBox(height: 20.h),
 
           // Buttons
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Row(
               children: [
                 Expanded(
@@ -934,18 +938,18 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                     onPressed:
                         (_isSaving || !hasTA) ? null : _save,
                     icon: _isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
+                        ? SizedBox(
+                            width: 16.w,
+                            height: 16.w,
+                            child: const CircularProgressIndicator(
                                 strokeWidth: 2,
                                 color: Colors.white),
                           )
-                        : const Icon(Icons.save_rounded,
-                            size: 16),
-                    label: const Text('Save',
+                        : Icon(Icons.save_rounded,
+                            size: 16.sp),
+                    label: Text('Save',
                         style: TextStyle(
-                            fontSize: 14,
+                            fontSize: 14.sp,
                             fontWeight: FontWeight.w600)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF8B5CF6),
@@ -954,15 +958,15 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                           ? Colors.white.withValues(alpha: 0.08)
                           : Colors.grey.shade200,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14),
+                      padding: EdgeInsets.symmetric(
+                          vertical: 14.h),
                       shape: RoundedRectangleBorder(
                           borderRadius:
-                              BorderRadius.circular(14)),
+                              BorderRadius.circular(14.r)),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12.w),
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _isSaving
@@ -977,15 +981,15 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                               ? Colors.white
                                   .withValues(alpha: 0.15)
                               : Colors.grey.shade300),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14),
+                      padding: EdgeInsets.symmetric(
+                          vertical: 14.h),
                       shape: RoundedRectangleBorder(
                           borderRadius:
-                              BorderRadius.circular(14)),
+                              BorderRadius.circular(14.r)),
                     ),
-                    child: const Text('Cancel',
+                    child: Text('Cancel',
                         style: TextStyle(
-                            fontSize: 14,
+                            fontSize: 14.sp,
                             fontWeight: FontWeight.w600)),
                   ),
                 ),
@@ -1010,14 +1014,14 @@ class _MiniChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 3.h),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(7.r),
       ),
       child: Text(label,
           style: TextStyle(
-              fontSize: 9.5,
+              fontSize: 9.5.sp,
               fontWeight: FontWeight.w700,
               color: color)),
     );
@@ -1047,14 +1051,14 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 14, color: iconColor),
-        const SizedBox(width: 8),
+        Icon(icon, size: 14.sp, color: iconColor),
+        SizedBox(width: 8.w),
         Text('$label: ',
-            style: TextStyle(fontSize: 13, color: textSub)),
+            style: TextStyle(fontSize: 13.sp, color: textSub)),
         Expanded(
           child: Text(value,
               style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 13.sp,
                   fontWeight: FontWeight.w600,
                   color: valueColor),
               overflow: TextOverflow.ellipsis),
@@ -1094,45 +1098,45 @@ class _PermTile extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            EdgeInsets.symmetric(horizontal: 20.w, vertical: 14.h),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(9),
+              padding: EdgeInsets.all(9.r),
               decoration: BoxDecoration(
                 color: iconColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(12.r),
               ),
-              child: Icon(icon, size: 18, color: iconColor),
+              child: Icon(icon, size: 18.sp, color: iconColor),
             ),
-            const SizedBox(width: 14),
+            SizedBox(width: 14.w),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
                       style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 13.sp,
                           fontWeight: FontWeight.w600,
                           color: textPrimary)),
-                  const SizedBox(height: 2),
+                  SizedBox(height: 2.h),
                   Text(subtitle,
                       style: TextStyle(
-                          fontSize: 11, color: textSub)),
+                          fontSize: 11.sp, color: textSub)),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12.w),
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              width: 22,
-              height: 22,
+              width: 22.w,
+              height: 22.w,
               decoration: BoxDecoration(
                 color: checked
                     ? const Color(0xFF8B5CF6)
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(6.r),
                 border: Border.all(
                   color: checked
                       ? const Color(0xFF8B5CF6)
@@ -1143,8 +1147,8 @@ class _PermTile extends StatelessWidget {
                 ),
               ),
               child: checked
-                  ? const Icon(Icons.check_rounded,
-                      size: 14, color: Colors.white)
+                  ? Icon(Icons.check_rounded,
+                      size: 14.sp, color: Colors.white)
                   : null,
             ),
           ],

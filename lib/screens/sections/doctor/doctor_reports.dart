@@ -4,12 +4,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:http/http.dart' as http;
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../core/constants.dart';
 import '../../../core/pdf_report_service.dart';
 import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class DoctorReports extends StatefulWidget {
   const DoctorReports({super.key});
@@ -210,7 +212,7 @@ class _DoctorReportsState extends State<DoctorReports> {
             ),
             if (_isLoading)
               const SliverFillRemaining(
-                  child: Center(child: CircularProgressIndicator()))
+                  hasScrollBody: true, child: SkeletonCardList())
             else if (_error != null)
               SliverFillRemaining(
                   child: Center(
@@ -218,11 +220,11 @@ class _DoctorReportsState extends State<DoctorReports> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                     Icon(Icons.error_outline,
-                        size: 64, color: Colors.grey.shade400),
-                    const SizedBox(height: 16),
+                        size: 64.sp, color: Colors.grey.shade400),
+                    SizedBox(height: 16.h),
                     Text(_error!,
                         style: TextStyle(color: Colors.grey.shade500)),
-                    const SizedBox(height: 16),
+                    SizedBox(height: 16.h),
                     ElevatedButton.icon(
                         onPressed: _loadReports,
                         icon: const Icon(Icons.refresh),
@@ -235,15 +237,15 @@ class _DoctorReportsState extends State<DoctorReports> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                     Icon(Icons.analytics_outlined,
-                        size: 64, color: Colors.grey.shade400),
-                    const SizedBox(height: 16),
+                        size: 64.sp, color: Colors.grey.shade400),
+                    SizedBox(height: 16.h),
                     Text('No reports yet',
                         style: TextStyle(
-                            fontSize: 16, color: Colors.grey.shade500)),
-                    const SizedBox(height: 8),
+                            fontSize: 16.sp, color: Colors.grey.shade500)),
+                    SizedBox(height: 8.h),
                     Text('Reports appear after ending sessions',
                         style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade400),
+                            fontSize: 13.sp, color: Colors.grey.shade400),
                         textAlign: TextAlign.center),
                   ])))
             else
@@ -251,12 +253,12 @@ class _DoctorReportsState extends State<DoctorReports> {
                   delegate: SliverChildBuilderDelegate(
                 (context, index) => Padding(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      EdgeInsets.symmetric(horizontal: 16.w, vertical: 6.h),
                   child: _buildReportCard(_reports[index], isDark, index),
                 ),
                 childCount: _reports.length,
               )),
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            SliverToBoxAdapter(child: SizedBox(height: 100.h)),
           ],
         ),
       ),
@@ -293,7 +295,7 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['present_count'] ??
         students.where((s) => s['status'] == 'confirmed').length;
     final rate = totalStudents > 0 ? (presentCount / totalStudents * 100) : 0.0;
- 
+
     final formattedDate = _fmtDate(dateField.toString());
     final formattedStart = _fmtTime12(startTime.toString());
     final durationText =
@@ -307,10 +309,10 @@ class _DoctorReportsState extends State<DoctorReports> {
             : const Color(0xFFEF4444);
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: EdgeInsets.symmetric(vertical: 4.h),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         border: Border.all(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.1)
@@ -320,26 +322,26 @@ class _DoctorReportsState extends State<DoctorReports> {
             : [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  blurRadius: 8.r,
+                  offset: Offset(0, 2.h),
                 ),
               ],
       ),
       child: Column(children: [
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16.r),
           child: Row(children: [
             Expanded(
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                   Text(subjectName,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: TextStyle(
+                          fontSize: 16.sp, fontWeight: FontWeight.bold)),
                   if (subjectCode.isNotEmpty)
                     Text(subjectCode,
                         style: TextStyle(
-                            fontSize: 12, color: Theme.of(context).hintColor)),
+                            fontSize: 12.sp, color: Theme.of(context).hintColor)),
                 ])),
             // ✅ Delete button
             IconButton(
@@ -348,28 +350,28 @@ class _DoctorReportsState extends State<DoctorReports> {
               icon: Icon(
                 Icons.delete_outline,
                 color: Colors.red.shade400,
-                size: 22,
+                size: 22.sp,
               ),
               tooltip: 'Delete Report',
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
               decoration: BoxDecoration(
                   color: rateColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14.r)),
               child: Column(children: [
                 Text('${rate.toInt()}%',
                     style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 18.sp,
                         fontWeight: FontWeight.bold,
                         color: rateColor)),
-                Text('Rate', style: TextStyle(fontSize: 9, color: rateColor)),
+                Text('Rate', style: TextStyle(fontSize: 9.sp, color: rateColor)),
               ]),
             ),
           ]),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.symmetric(horizontal: 16.w),
           child: Row(children: [
             _miniStat(Icons.calendar_today, formattedDate, 'Date'),
             _miniStat(Icons.play_arrow, formattedStart, 'Start'),
@@ -378,9 +380,9 @@ class _DoctorReportsState extends State<DoctorReports> {
             _miniStat(Icons.people, presentText, 'Present'),
           ]),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12.h),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: EdgeInsets.fromLTRB(16.w, 0, 16.w, 16.h),
           child: Builder(builder: (ctx) {
             final user = ctx.watch<AuthCubit>().state.user;
             final canView =
@@ -390,15 +392,15 @@ class _DoctorReportsState extends State<DoctorReports> {
 
             if (!canView && !canExport) {
               return Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
+                padding: EdgeInsets.symmetric(vertical: 10.h),
                 alignment: Alignment.center,
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.lock_outline, size: 14, color: Colors.grey),
-                    SizedBox(width: 6),
+                    Icon(Icons.lock_outline, size: 14.sp, color: Colors.grey),
+                    SizedBox(width: 6.w),
                     Text('Actions locked by professor',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
                   ],
                 ),
               );
@@ -410,12 +412,12 @@ class _DoctorReportsState extends State<DoctorReports> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _showDetails(report),
-                      icon: const Icon(Icons.visibility, size: 18),
+                      icon: Icon(Icons.visibility, size: 18.sp),
                       label: const Text('View Details'),
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        padding: EdgeInsets.symmetric(vertical: 12.h),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
+                            borderRadius: BorderRadius.circular(14.r)),
                         side: BorderSide(
                             color: Theme.of(context)
                                 .primaryColor
@@ -423,18 +425,18 @@ class _DoctorReportsState extends State<DoctorReports> {
                       ),
                     ),
                   ),
-                if (canView && canExport) const SizedBox(width: 12),
+                if (canView && canExport) SizedBox(width: 12.w),
                 if (canExport)
                   // ✅ Download PDF button
                   OutlinedButton.icon(
                     onPressed: () => _downloadPdf(report),
-                    icon: const Icon(Icons.picture_as_pdf, size: 18),
+                    icon: Icon(Icons.picture_as_pdf, size: 18.sp),
                     label: const Text('PDF'),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 16),
+                      padding: EdgeInsets.symmetric(
+                          vertical: 12.h, horizontal: 16.w),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                          borderRadius: BorderRadius.circular(14.r)),
                       side:
                           BorderSide(color: Colors.red.withValues(alpha: 0.5)),
                     ),
@@ -450,12 +452,12 @@ class _DoctorReportsState extends State<DoctorReports> {
   Widget _miniStat(IconData icon, String value, String label) {
     return Expanded(
         child: Column(children: [
-      Icon(icon, size: 14, color: Theme.of(context).hintColor),
-      const SizedBox(height: 4),
+      Icon(icon, size: 14.sp, color: Theme.of(context).hintColor),
+      SizedBox(height: 4.h),
       Text(value,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.bold)),
       Text(label,
-          style: TextStyle(fontSize: 9, color: Theme.of(context).hintColor)),
+          style: TextStyle(fontSize: 9.sp, color: Theme.of(context).hintColor)),
     ]));
   }
 
@@ -500,70 +502,70 @@ class _DoctorReportsState extends State<DoctorReports> {
         decoration: BoxDecoration(
             color: Theme.of(context).scaffoldBackgroundColor,
             borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24))),
+                BorderRadius.vertical(top: Radius.circular(24.r))),
         child: Column(children: [
           Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 48,
-              height: 4,
+              margin: EdgeInsets.symmetric(vertical: 12.h),
+              width: 48.w,
+              height: 4.h,
               decoration: BoxDecoration(
                   color: Colors.grey.shade600,
-                  borderRadius: BorderRadius.circular(4))),
+                  borderRadius: BorderRadius.circular(4.r))),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Row(children: [
               Expanded(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                     Text(subjectName,
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
+                        style: TextStyle(
+                            fontSize: 20.sp, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 4.h),
                     Text(
                         startTime.isNotEmpty
                             ? _fmtFull12(startTime)
                             : _fmtFull12(endTime),
                         style: TextStyle(
-                            fontSize: 12, color: Theme.of(context).hintColor)),
+                            fontSize: 12.sp, color: Theme.of(context).hintColor)),
                     if (endTime.isNotEmpty)
                       Text('Ended: ${_fmtTime12(endTime)}',
                           style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 12.sp,
                               color: Theme.of(context).hintColor)),
                     if (startTime.isNotEmpty && endTime.isNotEmpty)
                       Text(
                           'Duration: ${_calculateDuration(startTime, endTime)}',
                           style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 12.sp,
                               color: Theme.of(context).hintColor)),
                   ])),
               IconButton(
                 onPressed: () => _downloadPdf(report),
                 icon: Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: EdgeInsets.all(10.r),
                   decoration: BoxDecoration(
                       color: Colors.red.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.picture_as_pdf,
-                      color: Colors.red, size: 22),
+                      borderRadius: BorderRadius.circular(12.r)),
+                  child: Icon(Icons.picture_as_pdf,
+                      color: Colors.red, size: 22.sp),
                 ),
               ),
             ]),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12.h),
           Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: EdgeInsets.symmetric(horizontal: 20.w),
               child: Row(children: [
                 _summaryChip(
                     'Confirmed', confirmed.length, const Color(0xFF10B981)),
-                const SizedBox(width: 8),
+                SizedBox(width: 8.w),
                 _summaryChip(
                     'Pending', pending.length, const Color(0xFFF59E0B)),
-                const SizedBox(width: 8),
+                SizedBox(width: 8.w),
                 _summaryChip('Absent', absent.length, const Color(0xFFEF4444)),
               ])),
-          const SizedBox(height: 16),
+          SizedBox(height: 16.h),
           const Divider(height: 1),
           Expanded(
             child: students.isEmpty
@@ -572,7 +574,7 @@ class _DoctorReportsState extends State<DoctorReports> {
                         style: TextStyle(color: Color(0xFF94A3B8))))
                 : ListView.builder(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        EdgeInsets.symmetric(horizontal: 20.w, vertical: 8.h),
                     itemCount: students.length,
                     itemBuilder: (_, i) => _studentRow(students[i], isDark),
                   ),
@@ -584,15 +586,15 @@ class _DoctorReportsState extends State<DoctorReports> {
 
   Widget _summaryChip(String label, int count, Color color) => Expanded(
           child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: EdgeInsets.symmetric(vertical: 10.h),
         decoration: BoxDecoration(
             color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(12.r)),
         child: Column(children: [
           Text('$count',
               style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold, color: color)),
-          Text(label, style: TextStyle(fontSize: 10, color: color)),
+                  fontSize: 20.sp, fontWeight: FontWeight.bold, color: color)),
+          Text(label, style: TextStyle(fontSize: 10.sp, color: color)),
         ]),
       ));
 
@@ -626,60 +628,60 @@ class _DoctorReportsState extends State<DoctorReports> {
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: EdgeInsets.only(bottom: 8.h),
+      padding: EdgeInsets.all(12.r),
       decoration: BoxDecoration(
         color:
             isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12.r),
         border: Border(left: BorderSide(color: col, width: 3)),
       ),
       child: Row(children: [
         Container(
-          width: 36,
-          height: 36,
+          width: 36.w,
+          height: 36.w,
           decoration: BoxDecoration(
               color: col.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10.r)),
           child: Center(
               child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
                   style: TextStyle(fontWeight: FontWeight.bold, color: col))),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: 12.w),
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(name,
               style:
-                  const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  TextStyle(fontWeight: FontWeight.w600, fontSize: 13.sp)),
           if (sid.toString().isNotEmpty)
             Text(sid.toString(),
                 style: TextStyle(
-                    fontSize: 10, color: Theme.of(context).hintColor)),
+                    fontSize: 10.sp, color: Theme.of(context).hintColor)),
           if (faceAt.isNotEmpty)
             Text('Face: ${_fmtTime12(faceAt)}',
-                style: TextStyle(fontSize: 10, color: col)),
+                style: TextStyle(fontSize: 10.sp, color: col)),
           if (confirmedAt.isNotEmpty)
             Text('QR: ${_fmtTime12(confirmedAt)}',
-                style: TextStyle(fontSize: 10, color: col)),
+                style: TextStyle(fontSize: 10.sp, color: col)),
           if (duration.isNotEmpty)
             Text('Duration: $duration',
                 style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 10.sp,
                     fontWeight: FontWeight.w600,
                     color: Theme.of(context).primaryColor)),
         ])),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
           decoration: BoxDecoration(
               color: col.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20)),
+              borderRadius: BorderRadius.circular(20.r)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 14, color: col),
-            const SizedBox(width: 4),
+            Icon(icon, size: 14.sp, color: col),
+            SizedBox(width: 4.w),
             Text(lab,
                 style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600, color: col)),
+                    fontSize: 11.sp, fontWeight: FontWeight.w600, color: col)),
           ]),
         ),
       ]),
@@ -693,14 +695,14 @@ class _DoctorReportsState extends State<DoctorReports> {
     // Show loading
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Row(children: [
+        content: Row(children: [
           SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
+              width: 20.w,
+              height: 20.w,
+              child: const CircularProgressIndicator(
                   strokeWidth: 2, color: Colors.white)),
-          SizedBox(width: 16),
-          Text('Generating PDF...'),
+          SizedBox(width: 16.w),
+          const Text('Generating PDF...'),
         ]),
         backgroundColor: Theme.of(context).primaryColor,
         duration: const Duration(seconds: 3),

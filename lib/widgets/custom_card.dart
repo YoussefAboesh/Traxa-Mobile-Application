@@ -1,5 +1,6 @@
 // lib/widgets/custom_card.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../core/theme.dart';
 
 class CustomCard extends StatelessWidget {
@@ -26,12 +27,12 @@ class CustomCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(24.r),
           child: Ink(
-            padding: padding ?? const EdgeInsets.all(20),
+            padding: padding ?? EdgeInsets.all(20.r),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(24.r),
               border: Border.all(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.1)
@@ -42,8 +43,8 @@ class CustomCard extends StatelessWidget {
                   : [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
+                        blurRadius: 10.r,
+                        offset: Offset(0, 2.h),
                       ),
                     ],
             ),

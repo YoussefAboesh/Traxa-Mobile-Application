@@ -1,33 +1,20 @@
 import 'package:flutter/material.dart';
+import 'app_skeleton.dart';
 
+/// مؤشّر التحميل — تم تحديثه ليستخدم نظام الـ Skeleton الحديث بدلاً من
+/// شكل الدائرة التقليدي (CircularProgressIndicator).
 class LoadingIndicator extends StatelessWidget {
   final String? message;
+  final int itemCount;
 
-  const LoadingIndicator({super.key, this.message});
+  const LoadingIndicator({
+    super.key,
+    this.message,
+    this.itemCount = 6,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-            width: 50,
-            height: 50,
-            child: CircularProgressIndicator(
-              strokeWidth: 4,
-              color: Color(0xFF0EA5E9),
-            ),
-          ),
-          if (message != null) ...[
-            const SizedBox(height: 16),
-            Text(
-              message!,
-              style: const TextStyle(color: Color(0xFF94A3B8)),
-            ),
-          ],
-        ],
-      ),
-    );
+    return SkeletonCardList(itemCount: itemCount);
   }
 }

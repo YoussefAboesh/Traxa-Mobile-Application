@@ -1,6 +1,8 @@
 // lib/cubit/data/data_cubit.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/api_service.dart';
+import '../../services/cache_service.dart';
 import '../../models/student.dart';
 import '../../models/doctor.dart';
 import '../../models/subject.dart';
@@ -9,6 +11,7 @@ import '../../models/section.dart';
 import '../../models/grade.dart';
 import '../../models/attendance.dart';
 import '../../models/teaching_assistant.dart';
+import '../shared/loading_state.dart';
 import 'data_state.dart';
 
 class DataCubit extends Cubit<DataState> {
@@ -22,6 +25,12 @@ class DataCubit extends Cubit<DataState> {
   int get currentSemester => _currentSemester;
   String get currentAcademicYear => _currentAcademicYear;
 
+  // Lightweight debug logger — stripped out of release builds so that no
+  // data ever ends up in production logs.
+  void _log(String message) {
+    if (kDebugMode) debugPrint(message);
+  }
+
   Future<void> loadSystemData() async {
     try {
       await loadCurrentSemester();
@@ -33,18 +42,16 @@ class DataCubit extends Cubit<DataState> {
           currentAcademicYear: _currentAcademicYear,
         ));
       }
-      print('✅ System data: S$_currentSemester / $_currentAcademicYear');
     } catch (e) {
-      print('❌ Error loading system data: $e');
+      _log('❌ Error loading system data: $e');
     }
   }
 
   Future<void> loadCurrentSemester() async {
     try {
       _currentSemester = await ApiService.getCurrentSemester();
-      print('📅 Semester: $_currentSemester');
     } catch (e) {
-      print('❌ Error loading semester: $e');
+      _log('❌ Error loading semester: $e');
       _currentSemester = 1;
     }
   }
@@ -52,9 +59,8 @@ class DataCubit extends Cubit<DataState> {
   Future<void> loadCurrentAcademicYear() async {
     try {
       _currentAcademicYear = await ApiService.getCurrentAcademicYear();
-      print('📅 Academic year: $_currentAcademicYear');
     } catch (e) {
-      print('❌ Error loading academic year: $e');
+      _log('❌ Error loading academic year: $e');
       _currentAcademicYear = '2026-2027';
     }
   }
@@ -70,147 +76,136 @@ class DataCubit extends Cubit<DataState> {
         }
       }
     }
-    print('📋 Sections loaded: ${sections.length}');
     return sections;
+  }
+
+  // Builds the loaded state from raw json lists (used by both the live
+  // fetch path and the offline-cache fallback).
+  void _emitLoaded({
+    required List<dynamic> rawStudents,
+    required List<dynamic> rawDoctors,
+    required List<dynamic> rawSubjects,
+    required List<dynamic> rawLectures,
+    required List<dynamic> rawSections,
+    required List<dynamic> rawTAs,
+  }) {
+    final allStudents = rawStudents.map((j) => Student.fromJson(j)).toList();
+    final allDoctors = rawDoctors.map((j) => Doctor.fromJson(j)).toList();
+    final allSubjects = rawSubjects.map((j) => Subject.fromJson(j)).toList();
+    final allLectures = rawLectures.map((j) => Lecture.fromJson(j)).toList();
+    final allSections = _extractSections(rawSections);
+    final allTAs = rawTAs.map((j) => TeachingAssistant.fromJson(j)).toList();
+
+    final filteredSubjects =
+        allSubjects.where((s) => s.semester == _currentSemester).toList();
+
+    final filteredLectures = allLectures.where((l) {
+      final subject = allSubjects.firstWhere(
+        (s) => s.id == l.subjectId,
+        orElse: () => Subject(
+            id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
+      );
+      return subject.semester == _currentSemester;
+    }).toList();
+
+    emit(DataState.loaded(
+      students: allStudents,
+      doctors: allDoctors,
+      subjects: filteredSubjects,
+      lectures: filteredLectures,
+      allSubjects: allSubjects,
+      allLectures: allLectures,
+      allSections: allSections,
+      teachingAssistants: allTAs,
+      currentSemester: _currentSemester,
+      currentAcademicYear: _currentAcademicYear,
+    ));
+  }
+
+  // Offline fallback: rebuilds state from the last cached snapshot.
+  // Returns true when a usable cache was found.
+  Future<bool> _emitFromCache() async {
+    try {
+      final cached = await CacheService.loadAllData(ignoreExpiry: true);
+      if (cached == null) return false;
+      _emitLoaded(
+        rawStudents: cached['students'] ?? [],
+        rawDoctors: cached['doctors'] ?? [],
+        rawSubjects: cached['subjects'] ?? [],
+        rawLectures: cached['lectures'] ?? [],
+        rawSections: const [],
+        rawTAs: const [],
+      );
+      _log('📦 Loaded data from offline cache');
+      return true;
+    } catch (e) {
+      _log('❌ Error loading from cache: $e');
+      return false;
+    }
+  }
+
+  Future<void> _fetchAndEmit({required String errorPrefix}) async {
+    emit(state.copyWith(loadingState: LoadingState.loading()));
+
+    try {
+      await loadCurrentSemester();
+      await loadCurrentAcademicYear();
+
+      final results = await Future.wait([
+        ApiService.getStudents(),
+        ApiService.getDoctors(),
+        ApiService.getSubjects(),
+        ApiService.getLectures(),
+        ApiService.getSections(),
+        ApiService.getTeachingAssistants(),
+      ]);
+
+      _emitLoaded(
+        rawStudents: results[0],
+        rawDoctors: results[1],
+        rawSubjects: results[2],
+        rawLectures: results[3],
+        rawSections: results[4],
+        rawTAs: results[5],
+      );
+
+      // Persist a snapshot so the app still works when offline.
+      await CacheService.saveAllData(
+        students: results[0],
+        doctors: results[1],
+        subjects: results[2],
+        lectures: results[3],
+      );
+    } catch (e) {
+      _log('❌ $errorPrefix: $e');
+
+      // Network failed — try to show the last cached snapshot instead of
+      // leaving the user with an empty error screen (basic offline mode).
+      final usedCache = await _emitFromCache();
+      if (usedCache) return;
+
+      if (e.toString().contains('401') ||
+          e.toString().contains('Unauthorized')) {
+        emit(DataState.error('Session expired. Please login again.'));
+      } else {
+        emit(DataState.error(
+            'No internet connection and no offline data available.'));
+      }
+    }
   }
 
   Future<void> loadAllData() async {
     if (state.loadingState.isLoading) return;
-
-    emit(DataState.loading());
-
-    try {
-      await loadCurrentSemester();
-      await loadCurrentAcademicYear();
-
-      final results = await Future.wait([
-        ApiService.getStudents(),
-        ApiService.getDoctors(),
-        ApiService.getSubjects(),
-        ApiService.getLectures(),
-        ApiService.getSections(),
-        ApiService.getTeachingAssistants(), // ✅ Added
-      ]);
-
-      final allStudents = results[0].map((j) => Student.fromJson(j)).toList();
-      final allDoctors = results[1].map((j) => Doctor.fromJson(j)).toList();
-      final allSubjects = results[2].map((j) => Subject.fromJson(j)).toList();
-      final allLectures = results[3].map((j) => Lecture.fromJson(j)).toList();
-      final rawSections = results[4];
-      final rawTAs = results[5]; // ✅ Added
-      
-      final allSections = _extractSections(rawSections);
-      final allTAs = rawTAs.map((j) => TeachingAssistant.fromJson(j)).toList(); // ✅ Added
-
-      final filteredSubjects = allSubjects.where((s) => s.semester == _currentSemester).toList();
-
-      final filteredLectures = allLectures.where((l) {
-        final subject = allSubjects.firstWhere(
-          (s) => s.id == l.subjectId,
-          orElse: () => Subject(
-              id: 0,
-              name: '',
-              doctorId: 0,
-              doctorName: '',
-              level: 1,
-              semester: 1),
-        );
-        return subject.semester == _currentSemester;
-      }).toList();
-
-      emit(DataState.loaded(
-        students: allStudents,
-        doctors: allDoctors,
-        subjects: filteredSubjects,
-        lectures: filteredLectures,
-        allSubjects: allSubjects,
-        allLectures: allLectures,
-        allSections: allSections,
-        teachingAssistants: allTAs, // ✅ Added
-        currentSemester: _currentSemester,
-        currentAcademicYear: _currentAcademicYear,
-      ));
-
-      print('✅ Data loaded with ${allSections.length} sections');
-      print('✅ Teaching Assistants loaded: ${allTAs.length}');
-    } catch (e) {
-      emit(DataState.error('Failed to load data: ${e.toString()}'));
-      print('❌ Error loading data: $e');
-    }
+    await _fetchAndEmit(errorPrefix: 'Error loading data');
   }
 
   Future<void> fullReload() async {
-    print('🔄 DataCubit: Full reload started...');
-
     final token = ApiService.getToken();
     if (token == null || token.isEmpty) {
-      print('❌ No valid token available for full reload');
       emit(DataState.error('Session expired. Please login again.'));
       return;
     }
-
-    try {
-      await loadCurrentSemester();
-      await loadCurrentAcademicYear();
-
-      final results = await Future.wait([
-        ApiService.getStudents(),
-        ApiService.getDoctors(),
-        ApiService.getSubjects(),
-        ApiService.getLectures(),
-        ApiService.getSections(),
-        ApiService.getTeachingAssistants(), // ✅ Added
-      ]);
-
-      final allStudents = results[0].map((j) => Student.fromJson(j)).toList();
-      final allDoctors = results[1].map((j) => Doctor.fromJson(j)).toList();
-      final allSubjects = results[2].map((j) => Subject.fromJson(j)).toList();
-      final allLectures = results[3].map((j) => Lecture.fromJson(j)).toList();
-      final rawSections = results[4];
-      final rawTAs = results[5]; // ✅ Added
-      
-      final allSections = _extractSections(rawSections);
-      final allTAs = rawTAs.map((j) => TeachingAssistant.fromJson(j)).toList(); // ✅ Added
-
-      final filteredSubjects = allSubjects.where((s) => s.semester == _currentSemester).toList();
-
-      final filteredLectures = allLectures.where((l) {
-        final subject = allSubjects.firstWhere(
-          (s) => s.id == l.subjectId,
-          orElse: () => Subject(
-              id: 0,
-              name: '',
-              doctorId: 0,
-              doctorName: '',
-              level: 1,
-              semester: 1),
-        );
-        return subject.semester == _currentSemester;
-      }).toList();
-
-      emit(DataState.loaded(
-        students: allStudents,
-        doctors: allDoctors,
-        subjects: filteredSubjects,
-        lectures: filteredLectures,
-        allSubjects: allSubjects,
-        allLectures: allLectures,
-        allSections: allSections,
-        teachingAssistants: allTAs, // ✅ Added
-        currentSemester: _currentSemester,
-        currentAcademicYear: _currentAcademicYear,
-      ));
-
-      print('✅ Data loaded with ${allSections.length} sections');
-      print('✅ Teaching Assistants loaded: ${allTAs.length}');
-    } catch (e) {
-      print('❌ Full reload error: $e');
-      if (e.toString().contains('401') || e.toString().contains('Unauthorized')) {
-        emit(DataState.error('Session expired. Please login again.'));
-      } else {
-        emit(DataState.error('Failed to reload data: ${e.toString()}'));
-      }
-    }
+    await _fetchAndEmit(errorPrefix: 'Full reload error');
   }
 
   // ── Grades ────────────────────────────────────────────────────────────────
@@ -220,21 +215,19 @@ class DataCubit extends Cubit<DataState> {
       final response = await ApiService.getStudentGrades(studentId);
       final allGrades = response.map((j) => Grade.fromJson(j)).toList();
       emit(state.copyWith(allGrades: allGrades));
-      print('📊 All grades loaded: ${allGrades.length}');
     } catch (e) {
-      print('❌ Error loading grades: $e');
+      _log('❌ Error loading grades: $e');
     }
   }
 
   Future<void> loadStudentGradesWithToken(int studentId, String token) async {
-    print('📊 Loading grades for student $studentId with token');
     try {
-      final response = await ApiService.getStudentGradesWithToken(studentId, token);
+      final response =
+          await ApiService.getStudentGradesWithToken(studentId, token);
       final allGrades = response.map((j) => Grade.fromJson(j)).toList();
-      print('✅ Loaded ${allGrades.length} grades (all semesters)');
       emit(state.copyWith(allGrades: allGrades));
     } catch (e) {
-      print('❌ Error loading grades: $e');
+      _log('❌ Error loading grades: $e');
     }
   }
 
@@ -245,9 +238,8 @@ class DataCubit extends Cubit<DataState> {
   Future<void> checkGradesStatus(int studentId, String token) async {
     try {
       await ApiService.checkGradesStatus(studentId, token);
-      print('📊 Grades loaded');
     } catch (e) {
-      print('❌ Error checking grades status: $e');
+      _log('❌ Error checking grades status: $e');
     }
   }
 
@@ -256,11 +248,11 @@ class DataCubit extends Cubit<DataState> {
   Future<void> loadAttendance(String? token) async {
     try {
       final response = await ApiService.getAttendance(token);
-      final attendance = response.map((j) => AttendanceRecord.fromJson(j)).toList();
+      final attendance =
+          response.map((j) => AttendanceRecord.fromJson(j)).toList();
       emit(state.copyWith(attendance: attendance));
-      print('📋 Attendance loaded: ${attendance.length}');
     } catch (e) {
-      print('❌ Error loading attendance: $e');
+      _log('❌ Error loading attendance: $e');
     }
   }
 
@@ -275,9 +267,8 @@ class DataCubit extends Cubit<DataState> {
       final response = await ApiService.getTeachingAssistantsForDoctor(doctorId);
       final tas = response.map((j) => TeachingAssistant.fromJson(j)).toList();
       emit(state.copyWith(teachingAssistants: tas));
-      print('👥 TAs loaded for doctor $doctorId: ${tas.length}');
     } catch (e) {
-      print('❌ Error loading TAs: $e');
+      _log('❌ Error loading TAs: $e');
     }
   }
 
@@ -285,7 +276,8 @@ class DataCubit extends Cubit<DataState> {
     return await ApiService.getTAPermissions(taId);
   }
 
-  Future<Map<String, dynamic>> updateTAPermissions(int taId, Map<String, dynamic> permissions) async {
+  Future<Map<String, dynamic>> updateTAPermissions(
+      int taId, Map<String, dynamic> permissions) async {
     final result = await ApiService.updateTAPermissions(taId, permissions);
     if (result['success'] == true) {
       final updated = state.teachingAssistants.map((ta) {
@@ -308,7 +300,6 @@ class DataCubit extends Cubit<DataState> {
   }
 
   Future<void> refreshForNewSemester() async {
-    print('🔄 Refreshing data for new semester...');
     await loadCurrentSemester();
     await loadAllData();
   }
@@ -322,6 +313,5 @@ class DataCubit extends Cubit<DataState> {
       newGrades.add(updatedGrade);
     }
     emit(state.copyWith(allGrades: newGrades));
-    print('📊 Grade updated in state: ${updatedGrade.subjectName} = ${updatedGrade.total}');
   }
 }

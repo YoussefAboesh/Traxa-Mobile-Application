@@ -1,6 +1,7 @@
 // lib/widgets/theme_toggle_button.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../cubit/theme/theme_cubit.dart';
 
 class ThemeToggleButton extends StatelessWidget {
@@ -31,8 +32,8 @@ class ThemeToggleButton extends StatelessWidget {
         },
         child: Container(
           key: ValueKey<bool>(isDarkMode),
-          width: size,
-          height: size,
+          width: size.w,
+          height: size.w,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: isDarkMode
@@ -45,15 +46,15 @@ class ThemeToggleButton extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: (isDarkMode ? Colors.amber : fallbackColor).withValues(alpha: 0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                blurRadius: 8.r,
+                offset: Offset(0, 2.h),
               ),
             ],
           ),
           child: Icon(
             isDarkMode ? Icons.wb_sunny_rounded : Icons.nightlight_round,
             color: Colors.white,
-            size: size * 0.5,
+            size: size.w * 0.5,
           ),
         ),
       ),

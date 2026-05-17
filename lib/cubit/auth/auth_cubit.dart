@@ -62,6 +62,9 @@ class AuthCubit extends Cubit<AuthState> {
         if (isStudent) {
           userJson['role'] = 'student';
           userJson['userType'] = 'student';
+          // السيرفر بيرجّع student_id مش username — نخليه الـ username
+          // عشان رابط صورة البروفايل وباقي البحث يشتغلوا صح.
+          userJson['username'] ??= userJson['student_id']?.toString();
         } else {
           userJson['role'] ??= 'doctor';
           userJson['userType'] ??= userJson['role'];
@@ -69,10 +72,8 @@ class AuthCubit extends Cubit<AuthState> {
 
         final user = User.fromJson(userJson);
 
-        ApiService.setToken(token);
-
-        // Save to secure storage (encrypted)
-        await SecureStorageService.saveToken(token as String);
+        // The token is already persisted in secure storage by ApiService
+        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
         // Also save user type in SharedPreferences for non-sensitive use
@@ -109,13 +110,13 @@ class AuthCubit extends Cubit<AuthState> {
 
         studentJson['role'] = 'student';
         studentJson['userType'] = 'student';
+        // السيرفر بيرجّع student_id مش username — نخليه الـ username.
+        studentJson['username'] ??= studentJson['student_id']?.toString();
 
         final user = User.fromJson(studentJson);
 
-        ApiService.setToken(token);
-
-        // Save to secure storage (encrypted)
-        await SecureStorageService.saveToken(token as String);
+        // The token is already persisted in secure storage by ApiService
+        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
         // Also save user type in SharedPreferences for non-sensitive use
@@ -149,10 +150,8 @@ class AuthCubit extends Cubit<AuthState> {
 
         final user = User.fromJson(userJson);
 
-        ApiService.setToken(token);
-
-        // Save to secure storage (encrypted)
-        await SecureStorageService.saveToken(token as String);
+        // The token is already persisted in secure storage by ApiService
+        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
         // Also save user type in SharedPreferences for non-sensitive use

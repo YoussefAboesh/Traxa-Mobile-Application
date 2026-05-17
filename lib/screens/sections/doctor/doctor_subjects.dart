@@ -1,11 +1,13 @@
 // lib/screens/sections/doctor/doctor_subjects.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../models/subject.dart';
 import '../../../models/teaching_assistant.dart';
 import '../../../core/theme.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class DoctorSubjects extends StatefulWidget {
   const DoctorSubjects({super.key});
@@ -45,42 +47,33 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
     final currentSemester = dataState.currentSemester;
 
     final user = authState.user;
-    
+
     final isTA = user?.isTeachingAssistant ?? false;
-    
+
     List<Subject> doctorSubjects = [];
     List<TeachingAssistant> allTAs = dataState.teachingAssistants;
-    
+
     print('🔍 DEBUG: currentSemester = $currentSemester');
     print('🔍 DEBUG: dataState.subjects count = ${dataState.subjects.length}');
     print('🔍 DEBUG: allTAs count = ${allTAs.length}');
-    
+
     if (isTA) {
       // =========================
       // TA SUBJECTS
       // =========================
+      // المعيد: المواد اللي ليه سكاشن فيها (في الترم الحالي)
       final loggedUserId = user?.id ?? 0;
 
-      print('🔐 LOGGED USER ID => $loggedUserId');
+      final taSubjectIds = dataState.allSections
+          .where((sec) => sec.taId == loggedUserId)
+          .map((sec) => sec.subjectId)
+          .toSet();
 
-      final ta = allTAs.firstWhere(
-        (t) => t.id == loggedUserId,
-        orElse: () => TeachingAssistant(
-          id: -1,
-          name: '',
-          username: '',
-          assignedSubjectIds: [],
-        ),
-      );
+      doctorSubjects = dataState.subjects
+          .where((subject) => taSubjectIds.contains(subject.id))
+          .toList();
 
-      print('✅ MATCHED TA => ${ta.name}');
-      print('✅ TA ID => ${ta.id}');
-
-      doctorSubjects = dataState.subjects.where((subject) {
-        return subject.taId == ta.id;
-      }).toList();
-
-      print('✅ TA Subjects => ${doctorSubjects.length}');
+      print('✅ TA Sections subjects => ${doctorSubjects.length}');
     } else {
       // =========================
       // DOCTOR SUBJECTS
@@ -122,7 +115,9 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: dataState.loadingState.isLoading,
+        child: RefreshIndicator(
         onRefresh: _refreshSubjects,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
@@ -136,20 +131,20 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               actions: [
                 Container(
-                  margin: const EdgeInsets.only(right: 16),
+                  margin: EdgeInsets.only(right: 16.w),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
                   decoration: BoxDecoration(
                     color:
                         Theme.of(context).primaryColor.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(20.r),
                   ),
                   child: Text(
                     'S$currentSemester',
                     style: TextStyle(
                       color: Theme.of(context).primaryColor,
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 14.sp,
                     ),
                   ),
                 ),
@@ -159,11 +154,11 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
             // Search and Filters
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(12),
+                margin: EdgeInsets.all(16.r),
+                padding: EdgeInsets.all(12.r),
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(16.r),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.1)
@@ -176,7 +171,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     TextField(
                       style: TextStyle(
                         color: isDark ? Colors.white : const Color(0xFF1E293B),
-                        fontSize: 13,
+                        fontSize: 13.sp,
                       ),
                       decoration: InputDecoration(
                         hintText: 'Search subjects...',
@@ -184,14 +179,14 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           color: isDark
                               ? const Color(0xFF64748B)
                               : Colors.grey.shade500,
-                          fontSize: 12,
+                          fontSize: 12.sp,
                         ),
                         prefixIcon: Icon(
                           Icons.search,
                           color: isDark
                               ? const Color(0xFF94A3B8)
                               : Colors.grey.shade600,
-                          size: 18,
+                          size: 18.sp,
                         ),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
@@ -200,7 +195,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                                   color: isDark
                                       ? const Color(0xFF94A3B8)
                                       : Colors.grey.shade600,
-                                  size: 18,
+                                  size: 18.sp,
                                 ),
                                 onPressed: () =>
                                     setState(() => _searchQuery = ''),
@@ -211,17 +206,17 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                             ? Colors.white.withValues(alpha: 0.05)
                             : Colors.grey.shade100,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(12.r),
                           borderSide: BorderSide.none,
                         ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12.w, vertical: 10.h),
                       ),
                       onChanged: (value) =>
                           setState(() => _searchQuery = value),
                     ),
 
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12.h),
 
                     // Filter Row
                     Row(
@@ -231,8 +226,8 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           onTap: () =>
                               setState(() => _showFilters = !_showFilters),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 12.w, vertical: 8.h),
                             decoration: BoxDecoration(
                               color: _showFilters
                                   ? Theme.of(context)
@@ -241,7 +236,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                                   : (isDark
                                       ? Colors.white.withValues(alpha: 0.05)
                                       : Colors.grey.shade100),
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: BorderRadius.circular(20.r),
                               border: Border.all(
                                 color: _showFilters
                                     ? Theme.of(context)
@@ -259,18 +254,18 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                                   _showFilters
                                       ? Icons.filter_alt
                                       : Icons.filter_alt_outlined,
-                                  size: 16,
+                                  size: 16.sp,
                                   color: _showFilters
                                       ? Theme.of(context).primaryColor
                                       : (isDark
                                           ? const Color(0xFF94A3B8)
                                           : Colors.grey.shade600),
                                 ),
-                                const SizedBox(width: 4),
+                                SizedBox(width: 4.w),
                                 Text(
                                   'Filter',
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 12.sp,
                                     color: _showFilters
                                         ? Theme.of(context).primaryColor
                                         : (isDark
@@ -283,54 +278,56 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           ),
                         ),
 
-                        const SizedBox(width: 12),
-
-                        // Level Dropdown
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
+                        // Level Dropdown — يظهر/يختفي حسب زرار الفلتر
+                        if (_showFilters) ...[
+                          SizedBox(width: 12.w),
+                          Expanded(
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10.w),
+                              decoration: BoxDecoration(
                                 color: isDark
-                                    ? Colors.white.withValues(alpha: 0.1)
-                                    : Colors.grey.shade200,
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(20.r),
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.1)
+                                      : Colors.grey.shade200,
+                                ),
                               ),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int>(
-                                value: _selectedLevel,
-                                isExpanded: true,
-                                dropdownColor: Theme.of(context).cardColor,
-                                style: TextStyle(
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF1E293B),
-                                  fontSize: 12,
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  value: _selectedLevel,
+                                  isExpanded: true,
+                                  dropdownColor: Theme.of(context).cardColor,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF1E293B),
+                                    fontSize: 12.sp,
+                                  ),
+                                  icon: Icon(
+                                    Icons.arrow_drop_down,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : Colors.grey.shade600,
+                                  ),
+                                  items: [
+                                    const DropdownMenuItem(
+                                        value: 0, child: Text('All Levels')),
+                                    ..._levels.map((level) => DropdownMenuItem(
+                                          value: level,
+                                          child: Text('Level $level'),
+                                        )),
+                                  ],
+                                  onChanged: (value) => setState(
+                                      () => _selectedLevel = value ?? 0),
                                 ),
-                                icon: Icon(
-                                  Icons.arrow_drop_down,
-                                  color: isDark
-                                      ? const Color(0xFF94A3B8)
-                                      : Colors.grey.shade600,
-                                ),
-                                items: [
-                                  const DropdownMenuItem(
-                                      value: 0, child: Text('All Levels')),
-                                  ..._levels.map((level) => DropdownMenuItem(
-                                        value: level,
-                                        child: Text('Level $level'),
-                                      )),
-                                ],
-                                onChanged: (value) =>
-                                    setState(() => _selectedLevel = value ?? 0),
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ],
@@ -347,43 +344,43 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     levelSubjects.sort((a, b) => a.name.compareTo(b.name));
 
                     return Container(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                      margin: EdgeInsets.symmetric(
+                          horizontal: 16.w, vertical: 8.h),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Level Header
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10, horizontal: 16),
+                            padding: EdgeInsets.symmetric(
+                                vertical: 10.h, horizontal: 16.w),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
                                 colors: [Color(0xFF0EA5E9), Color(0xFF0284C7)],
                               ),
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(14.r),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
                                   'Level $level',
-                                  style: const TextStyle(
-                                    fontSize: 16,
+                                  style: TextStyle(
+                                    fontSize: 16.sp,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white,
                                   ),
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 3),
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 10.w, vertical: 3.h),
                                   decoration: BoxDecoration(
                                     color: Colors.white.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(12.r),
                                   ),
                                   child: Text(
                                     '${levelSubjects.length} subjects',
-                                    style: const TextStyle(
-                                      fontSize: 11,
+                                    style: TextStyle(
+                                      fontSize: 11.sp,
                                       color: Colors.white70,
                                     ),
                                   ),
@@ -391,12 +388,12 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          SizedBox(height: 12.h),
 
                           // Subjects table
                           _buildSubjectsTable(levelSubjects, allTAs, isTA),
 
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8.h),
                         ],
                       ),
                     );
@@ -408,40 +405,40 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
             if (subjectsByLevel.isEmpty)
               SliverToBoxAdapter(
                 child: Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.all(40),
+                  margin: EdgeInsets.all(16.r),
+                  padding: EdgeInsets.all(40.r),
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(20.r),
                   ),
                   child: Center(
                     child: Column(
                       children: [
                         Icon(Icons.book,
-                            size: 48,
+                            size: 48.sp,
                             color: isDark
                                 ? const Color(0xFF64748B)
                                 : Colors.grey.shade400),
-                        const SizedBox(height: 16),
+                        SizedBox(height: 16.h),
                         Text(
-                          isTA 
+                          isTA
                               ? 'No subjects assigned to you for Semester $currentSemester'
                               : 'No subjects for Semester $currentSemester',
                           style: TextStyle(
                             color: isDark
                                 ? const Color(0xFF94A3B8)
                                 : Colors.grey.shade600,
-                            fontSize: 16,
+                            fontSize: 16.sp,
                           ),
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: 8.h),
                         Text(
                           isTA
                               ? 'Subjects will appear when assigned by the professor for this semester'
                               : 'Subjects will appear when assigned in the current semester',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 12.sp,
                             color: isDark
                                 ? const Color(0xFF64748B)
                                 : Colors.grey.shade500,
@@ -454,9 +451,10 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                 ),
               ),
 
-            const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
+            SliverPadding(padding: EdgeInsets.only(bottom: 80.h)),
           ],
         ),
+      ),
       ),
     );
   }
@@ -464,34 +462,31 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
   Widget _buildSubjectsTable(List<Subject> subjects, List<TeachingAssistant> allTAs, bool isTA) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Helper function to get TA name by ID
-    String getTAName(int? taId) {
-      if (taId == null) return 'Not Assigned';
-
-      print('🔍 SEARCHING FOR TA ID => $taId');
-
-      for (var ta in allTAs) {
-        print('   TA => ${ta.id} : ${ta.name}');
+    // Resolve the TA name for a subject. The enriched /api/subjects-public
+    // endpoint already joins `ta_name`, so prefer that; only fall back to the
+    // TA list lookup when the name didn't come with the subject.
+    String getTAName(Subject subject) {
+      if (subject.taName != null && subject.taName!.trim().isNotEmpty) {
+        return subject.taName!;
       }
+      if (subject.taId == null) return 'Not Assigned';
 
       final ta = allTAs.firstWhere(
-        (t) => t.id == taId,
+        (t) => t.id == subject.taId,
         orElse: () => TeachingAssistant(
           id: 0,
-          name: 'Unknown TA',
+          name: 'Not Assigned',
           username: '',
           assignedSubjectIds: [],
         ),
       );
-
-      print('✅ Found TA: ${ta.name}');
       return ta.name;
     }
 
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14.r),
         border: Border.all(
           color: isDark
               ? Colors.white.withValues(alpha: 0.1)
@@ -502,56 +497,65 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
         children: [
           // Table Header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
             decoration: BoxDecoration(
               color: const Color(0xFF0EA5E9).withValues(alpha: 0.1),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(14),
-                topRight: Radius.circular(14),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(14.r),
+                topRight: Radius.circular(14.r),
               ),
             ),
             child: Row(
               children: [
                 Expanded(
-                  flex: 2,
+                  flex: 4,
                   child: Text(
                     'CODE',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.sp,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
                       color: const Color(0xFF0EA5E9),
                     ),
                   ),
                 ),
+                SizedBox(width: 8.w),
                 Expanded(
-                  flex: 3,
+                  flex: 6,
                   child: Text(
                     'SUBJECT NAME',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.sp,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
                       color: const Color(0xFF0EA5E9),
                     ),
                   ),
                 ),
+                SizedBox(width: 8.w),
                 Expanded(
-                  flex: 2,
+                  flex: 7,
                   child: Text(
                     isTA ? 'DOCTOR' : 'TA',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.sp,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
                       color: const Color(0xFF0EA5E9),
                     ),
                   ),
                 ),
+                SizedBox(width: 8.w),
                 Expanded(
-                  flex: 2,
+                  flex: 5,
                   child: Text(
                     'DEPARTMENT',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.sp,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
                       color: const Color(0xFF0EA5E9),
                     ),
                   ),
@@ -566,7 +570,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
             final isLast = entry.key == subjects.length - 1;
 
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 12.h),
               decoration: BoxDecoration(
                 border: !isLast
                     ? Border(
@@ -579,70 +583,85 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     : null,
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   // Code
                   Expanded(
-                    flex: 2,
+                    flex: 4,
                     child: Text(
                       subject.code ?? 'N/A',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontFamily: 'monospace',
                         color: const Color(0xFF0EA5E9),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11.sp,
                       ),
                     ),
                   ),
+                  SizedBox(width: 8.w),
                   // Subject Name
                   Expanded(
-                    flex: 3,
+                    flex: 6,
                     child: Text(
                       subject.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.w500,
                         color: isDark ? Colors.white : const Color(0xFF1E293B),
                       ),
                     ),
                   ),
+                  SizedBox(width: 8.w),
                   // TA Name (for Doctor) or Doctor Name (for TA)
                   Expanded(
-                    flex: 2,
+                    flex: 7,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 3),
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 8.w, vertical: 5.h),
                       decoration: BoxDecoration(
                         color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(8.r),
                       ),
                       child: Text(
-                        isTA ? subject.doctorName : getTAName(subject.taId),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF10B981),
-                        ),
+                        isTA ? subject.doctorName : getTAName(subject),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10.sp,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF10B981),
+                        ),
                       ),
                     ),
                   ),
+                  SizedBox(width: 8.w),
                   // Department
                   Expanded(
-                    flex: 2,
+                    flex: 5,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 3),
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 8.w, vertical: 5.h),
                       decoration: BoxDecoration(
                         color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(8.r),
                       ),
                       child: Text(
                         subject.department ?? 'General',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF8B5CF6),
-                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10.sp,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF8B5CF6),
+                        ),
                       ),
                     ),
                   ),

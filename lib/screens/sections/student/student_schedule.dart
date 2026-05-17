@@ -1,15 +1,17 @@
 // lib/screens/sections/student/student_schedule.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../cubit/auth/auth_cubit.dart';
 import '../../../cubit/data/data_cubit.dart';
 import '../../../models/student.dart';
 import '../../../models/subject.dart';
 import '../../../models/lecture.dart';
 import '../../../models/section.dart';
+import '../../../models/teaching_assistant.dart';
 import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
-import '../../../core/api_service.dart';
+import '../../../widgets/app_skeleton.dart';
 
 class StudentSchedule extends StatefulWidget {
   const StudentSchedule({super.key});
@@ -34,32 +36,48 @@ class _StudentScheduleState extends State<StudentSchedule> {
     'Thursday'
   ];
 
-  // Cache for TAs to avoid multiple API calls
-  Future<List<dynamic>>? _taFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    // Load TAs once when screen initializes
-    _taFuture = ApiService.getTeachingAssistants().then((tas) {
-      return tas;
-    });
-  }
-
   Future<void> _refreshSchedule() async {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
     try {
+      // loadAllData يحمّل المعيدين كمان، فاسم المعيد بيتحل فوراً.
       await context.read<DataCubit>().loadAllData();
-      // Refresh TAs cache
-      _taFuture = ApiService.getTeachingAssistants().then((tas) {
-        return tas;
-      });
     } catch (e) {
       print('Error refreshing schedule: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
+  }
+
+  /// يحلّ اسم المعيد للسكشن فوراً من البيانات المحمّلة (من غير أي API call).
+  String _resolveSectionTAName(
+    Section section,
+    List<TeachingAssistant> tas,
+    List<Subject> subjects,
+  ) {
+    // 1) الاسم جاي مع السكشن نفسه
+    final fromSection = section.taName.trim();
+    if (fromSection.isNotEmpty && fromSection.toLowerCase() != 'ta') {
+      return fromSection;
+    }
+    // 2) من قائمة المعيدين عن طريق ta_id
+    if (section.taId != null) {
+      final m = tas.where((t) => t.id == section.taId).toList();
+      if (m.isNotEmpty && m.first.name.trim().isNotEmpty) {
+        return m.first.name;
+      }
+    }
+    // 3) من المعيد المربوط بالمادة
+    final subj = subjects.where((s) => s.id == section.subjectId).toList();
+    if (subj.isNotEmpty) {
+      final tn = subj.first.taName?.trim();
+      if (tn != null &&
+          tn.isNotEmpty &&
+          tn.toLowerCase() != 'not assigned') {
+        return tn;
+      }
+    }
+    return 'TA';
   }
 
   List<Subject> getFilteredSubjects(
@@ -111,13 +129,30 @@ class _StudentScheduleState extends State<StudentSchedule> {
   }
 
   List<Section> getFilteredSections(
-      Student? student, List<Section> allSections) {
+      Student? student,
+      List<Section> allSections,
+      List<Subject> allSubjects,
+      int currentSemester) {
     if (student == null) return [];
-    List<Section> filtered = allSections
-        .where((s) =>
-            s.level == student.level &&
-            (s.department == null || s.department == student.department))
-        .toList();
+
+    // Sections don't carry a semester field, so resolve it from the
+    // linked subject and only keep sections of the current semester.
+    final Map<int, int> semesterBySubject = {
+      for (final s in allSubjects) s.id: s.semester
+    };
+
+    List<Section> filtered = allSections.where((s) {
+      if (s.level != student.level) return false;
+      if (s.department != null && s.department != student.department) {
+        return false;
+      }
+      final subjectSemester = semesterBySubject[s.subjectId];
+      // If the subject is known, enforce the current semester.
+      if (subjectSemester != null && subjectSemester != currentSemester) {
+        return false;
+      }
+      return true;
+    }).toList();
     if (_selectedDay.isNotEmpty) {
       filtered = filtered.where((s) => s.day == _selectedDay).toList();
     }
@@ -141,17 +176,29 @@ class _StudentScheduleState extends State<StudentSchedule> {
     final user = authState.user;
     final currentSemester = dataState.currentSemester;
 
-    final student = (user != null)
+    final realStudent = (user != null)
         ? findStudentSafely(
             userId: user.id,
             username: user.username,
             students: dataState.students)
         : null;
 
-    if (student == null) {
+    if (realStudent == null && dataState.loadingState.isLoaded) {
       return const Scaffold(
           body: Center(child: Text('Student data not found')));
     }
+
+    // أثناء التحميل بنعرض نفس شكل الصفحة كـ Skeleton.
+    final bool showSkeleton =
+        dataState.loadingState.isLoading || realStudent == null;
+    final student = realStudent ??
+        Student(
+          id: 0,
+          name: 'Student Name',
+          studentId: '00000000',
+          level: 1,
+          department: 'General',
+        );
 
     final allSubjects = dataState.allSubjects;
     final allLectures = dataState.allLectures;
@@ -176,7 +223,8 @@ class _StudentScheduleState extends State<StudentSchedule> {
         ..sort((a, b) => a.timeDisplay.compareTo(b.timeDisplay));
     }
 
-    final filteredSections = getFilteredSections(student, allSections);
+    final filteredSections =
+        getFilteredSections(student, allSections, allSubjects, currentSemester);
     final Map<String, List<Section>> sectionsByDay = {};
     for (final day in _days) {
       sectionsByDay[day] = filteredSections.where((s) => s.day == day).toList()
@@ -185,7 +233,9 @@ class _StudentScheduleState extends State<StudentSchedule> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
+      body: AppSkeleton(
+        enabled: showSkeleton,
+        child: RefreshIndicator(
         onRefresh: _refreshSchedule,
         color: Theme.of(context).primaryColor,
         backgroundColor: Theme.of(context).cardColor,
@@ -194,13 +244,13 @@ class _StudentScheduleState extends State<StudentSchedule> {
             // Tab Bar
             SliverToBoxAdapter(
               child: Container(
-                margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                padding: const EdgeInsets.all(4),
+                margin: EdgeInsets.fromLTRB(20.w, 16.h, 20.w, 12.h),
+                padding: EdgeInsets.all(4.r),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
                       : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(40),
+                  borderRadius: BorderRadius.circular(40.r),
                 ),
                 child: Row(
                   children: [
@@ -217,29 +267,29 @@ class _StudentScheduleState extends State<StudentSchedule> {
             // Filters
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: EdgeInsets.symmetric(horizontal: 20.w),
                 child: Column(
                   children: [
                     // Semester banner
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 12.w, vertical: 8.h),
                       decoration: BoxDecoration(
                         color: Theme.of(context)
                             .primaryColor
                             .withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(12.r),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.info_outline,
-                              size: 16, color: Theme.of(context).primaryColor),
-                          const SizedBox(width: 8),
+                              size: 16.sp, color: Theme.of(context).primaryColor),
+                          SizedBox(width: 8.w),
                           Text(
                             'Showing data for Semester $currentSemester',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 12.sp,
                               fontWeight: FontWeight.w500,
                               color: Theme.of(context).primaryColor,
                             ),
@@ -247,7 +297,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12.h),
                     // Search
                     TextField(
                       onChanged: (v) => setState(() => _searchQuery = v),
@@ -255,7 +305,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
                           color: isDark
                               ? Colors.white
                               : const Color(0xFF1E293B),
-                          fontSize: 14),
+                          fontSize: 14.sp),
                       decoration: InputDecoration(
                         hintText: _selectedTab == 0
                             ? 'Search subjects...'
@@ -266,21 +316,21 @@ class _StudentScheduleState extends State<StudentSchedule> {
                             color: isDark
                                 ? const Color(0xFF94A3B8)
                                 : Colors.grey.shade500,
-                            fontSize: 13),
+                            fontSize: 13.sp),
                         prefixIcon: Icon(Icons.search,
-                            color: Theme.of(context).primaryColor, size: 20),
+                            color: Theme.of(context).primaryColor, size: 20.sp),
                         filled: true,
                         fillColor: isDark
                             ? Colors.white.withValues(alpha: 0.05)
                             : Colors.grey.shade100,
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(16.r),
                             borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16.w, vertical: 12.h),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12.h),
                     // Day filter (for lectures & sections)
                     if (_selectedTab == 1 || _selectedTab == 2)
                       Row(
@@ -288,27 +338,27 @@ class _StudentScheduleState extends State<StudentSchedule> {
                           Expanded(
                             child: Container(
                               padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
+                                  EdgeInsets.symmetric(horizontal: 10.w),
                               decoration: BoxDecoration(
                                 color: isDark
                                     ? Colors.white.withValues(alpha: 0.05)
                                     : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(16.r),
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   value: _selectedDay.isEmpty
                                       ? null
                                       : _selectedDay,
-                                  hint: const Text('All Days',
-                                      style: TextStyle(fontSize: 13)),
+                                  hint: Text('All Days',
+                                      style: TextStyle(fontSize: 13.sp)),
                                   isExpanded: true,
                                   dropdownColor: Theme.of(context).cardColor,
                                   style: TextStyle(
                                       color: isDark
                                           ? Colors.white
                                           : const Color(0xFF1E293B),
-                                      fontSize: 13),
+                                      fontSize: 13.sp),
                                   items: [
                                     const DropdownMenuItem(
                                         value: '', child: Text('All Days')),
@@ -323,7 +373,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
                           ),
                         ],
                       ),
-                    const SizedBox(height: 16),
+                    SizedBox(height: 16.h),
                   ],
                 ),
               ),
@@ -336,9 +386,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
             else if (_selectedTab == 1)
               _buildLecturesContent(lecturesByDay, isDark)
             else
-              _buildSectionsContent(sectionsByDay, isDark),
+              _buildSectionsContent(sectionsByDay, isDark,
+                  dataState.teachingAssistants, allSubjects),
           ],
         ),
+      ),
       ),
     );
   }
@@ -353,27 +405,27 @@ class _StudentScheduleState extends State<StudentSchedule> {
           _selectedDay = '';
         }),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: EdgeInsets.symmetric(vertical: 9.h),
           decoration: BoxDecoration(
             color:
                 isActive ? Theme.of(context).primaryColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(36),
+            borderRadius: BorderRadius.circular(36.r),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon,
-                  size: 14,
+                  size: 14.sp,
                   color: isActive
                       ? Colors.white
                       : (isDark
                           ? const Color(0xFF94A3B8)
                           : Colors.grey.shade600)),
-              const SizedBox(width: 4),
+              SizedBox(width: 4.w),
               Text(label,
                   style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      fontSize: 12,
+                      fontSize: 12.sp,
                       color: isActive
                           ? Colors.white
                           : (isDark
@@ -387,7 +439,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
   }
 
   // ==================== MODERN SUBJECTS TABLE ====================
-  
+
   SliverList _buildSubjectsContent(
       List<Subject> sem1, List<Subject> sem2, bool isDark) {
     return SliverList(
@@ -397,25 +449,25 @@ class _StudentScheduleState extends State<StudentSchedule> {
         if (sem2.isNotEmpty)
           _buildModernSemesterCard('Semester 2', sem2, isDark),
         if (sem1.isEmpty && sem2.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(
+          Padding(
+            padding: EdgeInsets.all(40.r),
+            child: const Center(
                 child: Text('No subjects found',
                     style: TextStyle(color: Color(0xFF94A3B8)))),
           ),
-        const SizedBox(height: 100),
+        SizedBox(height: 100.h),
       ]),
     );
   }
 
   Widget _buildModernSemesterCard(String title, List<Subject> subjects, bool isDark) {
     final totalCredits = subjects.fold<int>(0, (sum, s) => sum + s.totalCreditHours);
-    
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      margin: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20.r),
         border: Border.all(
           color: isDark
               ? Colors.white.withValues(alpha: 0.1)
@@ -426,8 +478,8 @@ class _StudentScheduleState extends State<StudentSchedule> {
             : [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
+                  blurRadius: 10.r,
+                  offset: Offset(0, 2.h),
                 ),
               ],
       ),
@@ -436,7 +488,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
         children: [
           // Card Header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -446,9 +498,9 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   Theme.of(context).primaryColor.withValues(alpha: 0.8),
                 ],
               ),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(20),
-                topRight: Radius.circular(20),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20.r),
+                topRight: Radius.circular(20.r),
               ),
             ),
             child: Row(
@@ -457,22 +509,22 @@ class _StudentScheduleState extends State<StudentSchedule> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(6),
+                      padding: EdgeInsets.all(6.r),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(10.r),
                       ),
                       child: Icon(
                         title == 'Semester 1' ? Icons.looks_one : Icons.looks_two,
-                        size: 18,
+                        size: 18.sp,
                         color: Colors.white,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10.w),
                     Text(
                       title,
-                      style: const TextStyle(
-                        fontSize: 16,
+                      style: TextStyle(
+                        fontSize: 16.sp,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
@@ -480,15 +532,15 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(12.r),
                   ),
                   child: Text(
                     '${subjects.length} subjects • $totalCredits credits',
-                    style: const TextStyle(
-                      fontSize: 11,
+                    style: TextStyle(
+                      fontSize: 11.sp,
                       color: Colors.white70,
                     ),
                   ),
@@ -496,10 +548,10 @@ class _StudentScheduleState extends State<StudentSchedule> {
               ],
             ),
           ),
-          
+
           // Table Header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
             decoration: BoxDecoration(
               color: isDark
                   ? const Color(0xFF0F172A)
@@ -516,11 +568,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
-                  width: 70,
+                  width: 70.w,
                   child: Text(
                     'CODE',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 11.sp,
                       fontWeight: FontWeight.w700,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                       letterSpacing: 0.5,
@@ -532,7 +584,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   child: Text(
                     'SUBJECT',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 11.sp,
                       fontWeight: FontWeight.w700,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                       letterSpacing: 0.5,
@@ -544,7 +596,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   child: Text(
                     'DOCTOR',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 11.sp,
                       fontWeight: FontWeight.w700,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                       letterSpacing: 0.5,
@@ -552,12 +604,12 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   ),
                 ),
                 SizedBox(
-                  width: 45,
+                  width: 45.w,
                   child: Center(
                     child: Text(
                       'HRS',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 11.sp,
                         fontWeight: FontWeight.w700,
                         color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                         letterSpacing: 0.5,
@@ -568,16 +620,16 @@ class _StudentScheduleState extends State<StudentSchedule> {
               ],
             ),
           ),
-          
+
           // Subjects Rows
           Column(
             children: subjects.asMap().entries.map((entry) {
               final index = entry.key;
               final subject = entry.value;
               final isLast = index == subjects.length - 1;
-              
+
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
                 decoration: BoxDecoration(
                   color: isDark
                       ? (index.isEven ? const Color(0xFF1E293B) : const Color(0xFF1A2538))
@@ -597,11 +649,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
                   children: [
                     // Code Column
                     SizedBox(
-                      width: 50,
+                      width: 50.w,
                       child: Text(
                         subject.code ?? 'N/A',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 11.sp,
                           fontWeight: FontWeight.w600,
                           color: Theme.of(context).primaryColor,
                           fontFamily: 'monospace',
@@ -614,11 +666,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
                     Expanded(
                       flex: 1,
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 8),
+                        padding: EdgeInsets.only(left: 8.w),
                         child: Text(
                           subject.name,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 13.sp,
                             fontWeight: FontWeight.w500,
                             color: isDark ? Colors.white : const Color(0xFF1E293B),
                           ),
@@ -631,11 +683,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
                     Expanded(
                       flex: 1,
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 8),
+                        padding: EdgeInsets.only(left: 8.w),
                         child: Text(
                           subject.doctorName,
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 12.sp,
                             color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                             height: 1.3,
                           ),
@@ -646,20 +698,20 @@ class _StudentScheduleState extends State<StudentSchedule> {
                     ),
                     // Hours Column
                     SizedBox(
-                      width: 45,
+                      width: 45.w,
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                           decoration: BoxDecoration(
                             color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(8.r),
                           ),
                           child: Text(
                             '${subject.totalCreditHours}',
-                            style: const TextStyle(
-                              fontSize: 11,
+                            style: TextStyle(
+                              fontSize: 11.sp,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF10B981),
+                              color: const Color(0xFF10B981),
                             ),
                           ),
                         ),
@@ -670,8 +722,8 @@ class _StudentScheduleState extends State<StudentSchedule> {
               );
             }).toList(),
           ),
-          
-          const SizedBox(height: 8),
+
+          SizedBox(height: 8.h),
         ],
       ),
     );
@@ -691,20 +743,25 @@ class _StudentScheduleState extends State<StudentSchedule> {
             emptyMsg: 'No lectures',
             children: dayLectures
                 .map((l) => Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 12.w, vertical: 4.h),
                       child: _buildLectureCard(l, isDark),
                     ))
                 .toList(),
             accentColor: Theme.of(context).primaryColor,
           );
         }),
-        const SizedBox(height: 100),
+        SizedBox(height: 100.h),
       ]),
     );
   }
 
-  SliverList _buildSectionsContent(Map<String, List<Section>> sectionsByDay, bool isDark) {
+  SliverList _buildSectionsContent(
+    Map<String, List<Section>> sectionsByDay,
+    bool isDark,
+    List<TeachingAssistant> tas,
+    List<Subject> subjects,
+  ) {
     final daysToShow = _selectedDay.isNotEmpty ? [_selectedDay] : _days;
     return SliverList(
       delegate: SliverChildListDelegate([
@@ -718,15 +775,16 @@ class _StudentScheduleState extends State<StudentSchedule> {
             emptyMsg: 'No sections',
             children: daySections
                 .map((s) => Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      child: _buildSectionCard(s, isDark),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 12.w, vertical: 4.h),
+                      child: _buildSectionCard(
+                          s, isDark, _resolveSectionTAName(s, tas, subjects)),
                     ))
                 .toList(),
             accentColor: const Color(0xFF10B981),
           );
         }),
-        const SizedBox(height: 100),
+        SizedBox(height: 100.h),
       ]),
     );
   }
@@ -741,7 +799,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
     required Color accentColor,
   }) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
       decoration: BoxDecoration(
         gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -750,32 +808,32 @@ class _StudentScheduleState extends State<StudentSchedule> {
               accentColor.withValues(alpha: 0.08),
               accentColor.withValues(alpha: 0.03),
             ]),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16.r),
         border: Border(left: BorderSide(color: accentColor, width: 3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(12.r),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(day,
                     style: TextStyle(
-                        fontSize: 15,
+                        fontSize: 15.sp,
                         fontWeight: FontWeight.bold,
                         color: isDark ? Colors.white : const Color(0xFF1E293B))),
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
                   decoration: BoxDecoration(
                       color: accentColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12.r)),
                   child: Text('$count',
                       style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 11,
+                          fontSize: 11.sp,
                           color: accentColor)),
                 ),
               ],
@@ -783,17 +841,17 @@ class _StudentScheduleState extends State<StudentSchedule> {
           ),
           if (isEmpty)
             Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
+                padding: EdgeInsets.symmetric(vertical: 20.h),
                 child: Center(
                     child: Text(emptyMsg,
                         style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 13.sp,
                             color: isDark
                                 ? const Color(0xFF94A3B8)
                                 : Colors.grey.shade600))))
           else
             ...children,
-          const SizedBox(height: 8),
+          SizedBox(height: 8.h),
         ],
       ),
     );
@@ -810,56 +868,56 @@ class _StudentScheduleState extends State<StudentSchedule> {
     final subTextColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12.r),
       decoration: BoxDecoration(
           color: cardBg,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12.r),
           border: Border.all(color: borderColor)),
       child: Row(
         children: [
           Container(
-              width: 3,
-              height: 48,
+              width: 3.w,
+              height: 48.h,
               decoration: BoxDecoration(
                   color: Theme.of(context).primaryColor,
-                  borderRadius: BorderRadius.circular(2))),
-          const SizedBox(width: 12),
+                  borderRadius: BorderRadius.circular(2.r))),
+          SizedBox(width: 12.w),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(lecture.subjectName,
                     style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 13.sp,
                         fontWeight: FontWeight.bold,
                         color: textColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Row(children: [
                   Icon(Icons.school_rounded,
-                      size: 10, color: subTextColor),
-                  const SizedBox(width: 3),
+                      size: 10.sp, color: subTextColor),
+                  SizedBox(width: 3.w),
                   Text(lecture.doctorName,
-                      style: TextStyle(fontSize: 10, color: subTextColor),
+                      style: TextStyle(fontSize: 10.sp, color: subTextColor),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                 ]),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Row(
                   children: [
                     Icon(Icons.access_time,
-                        size: 10, color: subTextColor),
-                    const SizedBox(width: 2),
+                        size: 10.sp, color: subTextColor),
+                    SizedBox(width: 2.w),
                     Text(lecture.timeDisplay,
-                        style: TextStyle(fontSize: 9, color: subTextColor)),
-                    const SizedBox(width: 10),
+                        style: TextStyle(fontSize: 9.sp, color: subTextColor)),
+                    SizedBox(width: 10.w),
                     Icon(Icons.location_on,
-                        size: 10, color: subTextColor),
-                    const SizedBox(width: 2),
+                        size: 10.sp, color: subTextColor),
+                    SizedBox(width: 2.w),
                     Flexible(
                         child: Text(lecture.locationName,
-                            style: TextStyle(fontSize: 9, color: subTextColor),
+                            style: TextStyle(fontSize: 9.sp, color: subTextColor),
                             overflow: TextOverflow.ellipsis)),
                   ],
                 ),
@@ -867,14 +925,14 @@ class _StudentScheduleState extends State<StudentSchedule> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 3.h),
             decoration: BoxDecoration(
               color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(8.r),
             ),
             child: Text('Lec',
                 style: TextStyle(
-                    fontSize: 9,
+                    fontSize: 9.sp,
                     fontWeight: FontWeight.bold,
                     color: Theme.of(context).primaryColor)),
           ),
@@ -883,7 +941,7 @@ class _StudentScheduleState extends State<StudentSchedule> {
     );
   }
 
-  Widget _buildSectionCard(Section section, bool isDark) {
+  Widget _buildSectionCard(Section section, bool isDark, String taName) {
     final cardBg = isDark
         ? Colors.white.withValues(alpha: 0.05)
         : Colors.grey.shade100;
@@ -895,69 +953,59 @@ class _StudentScheduleState extends State<StudentSchedule> {
     const sectionColor = Color(0xFF10B981);
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12.r),
       decoration: BoxDecoration(
           color: cardBg,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12.r),
           border: Border.all(color: borderColor)),
       child: Row(
         children: [
           Container(
-              width: 3,
-              height: 48,
+              width: 3.w,
+              height: 48.h,
               decoration: BoxDecoration(
-                  color: sectionColor, borderRadius: BorderRadius.circular(2))),
-          const SizedBox(width: 12),
+                  color: sectionColor, borderRadius: BorderRadius.circular(2.r))),
+          SizedBox(width: 12.w),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(section.subjectName,
                     style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 13.sp,
                         fontWeight: FontWeight.bold,
                         color: textColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Row(children: [
                   Icon(Icons.school_rounded,
-                      size: 10, color: subTextColor),
-                  const SizedBox(width: 3),
-                  FutureBuilder<List<dynamic>>(
-                    future: _taFuture,
-                    builder: (context, snapshot) {
-                      String taName = section.taName;
-                      if (snapshot.hasData && section.taId != null) {
-                        final tas = snapshot.data!;
-                        final ta = tas.where((t) => t['id'] == section.taId).toList();
-                        if (ta.isNotEmpty) {
-                          taName = ta.first['name'] ?? ta.first['username'] ?? 'TA';
-                        }
-                      }
-                      return Text(
-                        taName,
-                        style: TextStyle(fontSize: 10, color: subTextColor),
-                        overflow: TextOverflow.ellipsis,
-                      );
-                    },
+                      size: 10.sp, color: subTextColor),
+                  SizedBox(width: 3.w),
+                  Flexible(
+                    child: Text(
+                      taName,
+                      style: TextStyle(fontSize: 10.sp, color: subTextColor),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
                   ),
                 ]),
-                const SizedBox(height: 2),
+                SizedBox(height: 2.h),
                 Row(
                   children: [
                     Icon(Icons.access_time,
-                        size: 10, color: subTextColor),
-                    const SizedBox(width: 2),
+                        size: 10.sp, color: subTextColor),
+                    SizedBox(width: 2.w),
                     Text(section.timeDisplay,
-                        style: TextStyle(fontSize: 9, color: subTextColor)),
-                    const SizedBox(width: 10),
+                        style: TextStyle(fontSize: 9.sp, color: subTextColor)),
+                    SizedBox(width: 10.w),
                     Icon(Icons.location_on,
-                        size: 10, color: subTextColor),
-                    const SizedBox(width: 2),
+                        size: 10.sp, color: subTextColor),
+                    SizedBox(width: 2.w),
                     Flexible(
                         child: Text(section.locationName,
-                            style: TextStyle(fontSize: 9, color: subTextColor),
+                            style: TextStyle(fontSize: 9.sp, color: subTextColor),
                             overflow: TextOverflow.ellipsis)),
                   ],
                 ),
@@ -965,14 +1013,14 @@ class _StudentScheduleState extends State<StudentSchedule> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: 7.w, vertical: 3.h),
             decoration: BoxDecoration(
               color: sectionColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(8.r),
             ),
-            child: const Text('Sec',
+            child: Text('Sec',
                 style: TextStyle(
-                    fontSize: 9,
+                    fontSize: 9.sp,
                     fontWeight: FontWeight.bold,
                     color: sectionColor)),
           ),

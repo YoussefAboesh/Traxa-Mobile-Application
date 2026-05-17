@@ -1,148 +1,125 @@
 // lib/services/secure_storage_service.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+/// Encrypted storage for sensitive data (auth token, user data, refresh token).
+///
+/// On Android it uses Jetpack `EncryptedSharedPreferences`, and on iOS the
+/// Keychain (unlocked after first device unlock). Any read that fails because
+/// the underlying entry was corrupted — a common case after an app reinstall
+/// or OS backup restore — automatically purges the bad key so the user can
+/// still recover by logging in again.
 class SecureStorageService {
-  static const _storage = FlutterSecureStorage();
-  
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
   // Storage keys for sensitive data
   static const String _tokenKey = 'auth_token_secure';
   static const String _userDataKey = 'user_data_secure';
   static const String _refreshTokenKey = 'refresh_token_secure';
 
-  // ================== TOKEN MANAGEMENT ==================
+  // ================== INTERNAL HELPERS ==================
 
-  /// Save auth token securely (encrypted)
-  static Future<void> saveToken(String token) async {
+  static void _log(String message) {
+    if (kDebugMode) print(message);
+  }
+
+  /// Writes [value] under [key]. [label] is only used for log messages.
+  static Future<void> _write(String key, String value, String label) async {
     try {
-      await _storage.write(key: _tokenKey, value: token);
-      print('🔐 Token saved securely (encrypted)');
+      await _storage.write(key: key, value: value);
+      _log('🔐 $label saved securely (encrypted)');
     } catch (e) {
-      print('❌ Error saving token to secure storage: $e');
+      _log('❌ Error saving $label to secure storage: $e');
       rethrow;
     }
   }
 
-  /// Get auth token from secure storage
-  static Future<String?> getToken() async {
+  /// Reads the value stored under [key]. Returns `null` when it is missing or
+  /// when the entry is corrupted — in the latter case the bad key is purged.
+  static Future<String?> _read(String key, String label) async {
     try {
-      final token = await _storage.read(key: _tokenKey);
-      if (token != null) {
-        print('🔑 Token retrieved from secure storage');
-      }
-      return token;
+      final value = await _storage.read(key: key);
+      if (value != null) _log('🔑 $label retrieved from secure storage');
+      return value;
     } catch (e) {
-      print('❌ Error reading token from secure storage: $e');
+      _log('❌ Error reading $label from secure storage: $e');
+      // Recover from corrupted data so the user is not locked out forever.
+      try {
+        await _storage.delete(key: key);
+        _log('🧹 Corrupted $label entry purged from secure storage');
+      } catch (_) {}
       return null;
     }
   }
 
-  /// Check if token exists
-  static Future<bool> hasToken() async {
+  /// Deletes the value stored under [key].
+  static Future<void> _delete(String key, String label) async {
     try {
-      final token = await _storage.read(key: _tokenKey);
-      return token != null && token.isNotEmpty;
+      await _storage.delete(key: key);
+      _log('🔐 $label deleted from secure storage');
     } catch (e) {
-      print('❌ Error checking token existence: $e');
-      return false;
-    }
-  }
-
-  /// Delete auth token securely
-  static Future<void> deleteToken() async {
-    try {
-      await _storage.delete(key: _tokenKey);
-      print('🔐 Token deleted from secure storage');
-    } catch (e) {
-      print('❌ Error deleting token: $e');
+      _log('❌ Error deleting $label: $e');
       rethrow;
     }
   }
+
+  // ================== TOKEN MANAGEMENT ==================
+
+  /// Save auth token securely (encrypted).
+  static Future<void> saveToken(String token) =>
+      _write(_tokenKey, token, 'Token');
+
+  /// Get auth token from secure storage.
+  static Future<String?> getToken() => _read(_tokenKey, 'Token');
+
+  /// Check if a non-empty token exists.
+  static Future<bool> hasToken() async {
+    final token = await getToken();
+    return token != null && token.isNotEmpty;
+  }
+
+  /// Delete auth token securely.
+  static Future<void> deleteToken() => _delete(_tokenKey, 'Token');
 
   // ================== USER DATA ==================
 
-  /// Save user data securely (encrypted)
-  static Future<void> saveUserData(String userData) async {
-    try {
-      await _storage.write(key: _userDataKey, value: userData);
-      print('🔐 User data saved securely (encrypted)');
-    } catch (e) {
-      print('❌ Error saving user data to secure storage: $e');
-      rethrow;
-    }
-  }
+  /// Save user data securely (encrypted).
+  static Future<void> saveUserData(String userData) =>
+      _write(_userDataKey, userData, 'User data');
 
-  /// Get user data from secure storage
-  static Future<String?> getUserData() async {
-    try {
-      final userData = await _storage.read(key: _userDataKey);
-      if (userData != null) {
-        print('📦 User data retrieved from secure storage');
-      }
-      return userData;
-    } catch (e) {
-      print('❌ Error reading user data from secure storage: $e');
-      return null;
-    }
-  }
+  /// Get user data from secure storage.
+  static Future<String?> getUserData() => _read(_userDataKey, 'User data');
 
-  /// Delete user data securely
-  static Future<void> deleteUserData() async {
-    try {
-      await _storage.delete(key: _userDataKey);
-      print('🔐 User data deleted from secure storage');
-    } catch (e) {
-      print('❌ Error deleting user data: $e');
-      rethrow;
-    }
-  }
+  /// Delete user data securely.
+  static Future<void> deleteUserData() =>
+      _delete(_userDataKey, 'User data');
 
   // ================== REFRESH TOKEN ==================
 
-  /// Save refresh token securely (encrypted)
-  static Future<void> saveRefreshToken(String token) async {
-    try {
-      await _storage.write(key: _refreshTokenKey, value: token);
-      print('🔐 Refresh token saved securely (encrypted)');
-    } catch (e) {
-      print('❌ Error saving refresh token: $e');
-      rethrow;
-    }
-  }
+  /// Save refresh token securely (encrypted).
+  static Future<void> saveRefreshToken(String token) =>
+      _write(_refreshTokenKey, token, 'Refresh token');
 
-  /// Get refresh token from secure storage
-  static Future<String?> getRefreshToken() async {
-    try {
-      final token = await _storage.read(key: _refreshTokenKey);
-      if (token != null) {
-        print('🔑 Refresh token retrieved from secure storage');
-      }
-      return token;
-    } catch (e) {
-      print('❌ Error reading refresh token: $e');
-      return null;
-    }
-  }
+  /// Get refresh token from secure storage.
+  static Future<String?> getRefreshToken() =>
+      _read(_refreshTokenKey, 'Refresh token');
 
-  /// Delete refresh token securely
-  static Future<void> deleteRefreshToken() async {
-    try {
-      await _storage.delete(key: _refreshTokenKey);
-      print('🔐 Refresh token deleted from secure storage');
-    } catch (e) {
-      print('❌ Error deleting refresh token: $e');
-      rethrow;
-    }
-  }
+  /// Delete refresh token securely.
+  static Future<void> deleteRefreshToken() =>
+      _delete(_refreshTokenKey, 'Refresh token');
 
   // ================== CLEAR ALL ==================
 
-  /// Clear all sensitive data from secure storage
+  /// Clear all sensitive data from secure storage.
   static Future<void> clearAll() async {
     try {
       await _storage.deleteAll();
-      print('🔐 All sensitive data cleared from secure storage');
+      _log('🔐 All sensitive data cleared from secure storage');
     } catch (e) {
-      print('❌ Error clearing secure storage: $e');
+      _log('❌ Error clearing secure storage: $e');
       rethrow;
     }
   }
