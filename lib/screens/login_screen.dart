@@ -104,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Hero Logo مع أنيميشن
+                    // Platform Logo مع أنيميشن
                     TweenAnimationBuilder(
                       tween: Tween<double>(begin: 0, end: 1),
                       duration: const Duration(milliseconds: 800),
@@ -116,63 +116,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         );
                       },
                       child: Container(
-                        width: 100.w,
-                        height: 100.w,
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Theme.of(context).primaryColor,
-                              const Color(0xFF0EA5E9),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(28.r),
+                          borderRadius: BorderRadius.circular(24.r),
                           boxShadow: [
                             BoxShadow(
-                              color: Theme.of(context).primaryColor.withValues(alpha: 0.4),
+                              color: Theme.of(context)
+                                  .primaryColor
+                                  .withValues(alpha: 0.35),
                               blurRadius: 30.r,
                               offset: Offset(0, 10.h),
                             ),
                           ],
                         ),
-                        child: Icon(
-                          _isStudentLogin
-                              ? Icons.school_rounded
-                              : FontAwesomeIcons.chalkboardUser,
-                          size: 48.sp,
-                          color: Colors.white,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(24.r),
+                          child: Image.asset(
+                            'icons/platform_logo.png',
+                            width: 290.w,
+                            fit: BoxFit.contain,
+                          ),
                         ),
-                      ),
-                    ),
-                    SizedBox(height: 32.h),
-
-                    // العنوان الرئيسي
-                    ShaderMask(
-                      shaderCallback: (bounds) => LinearGradient(
-                        colors: [
-                          Theme.of(context).primaryColor,
-                          const Color(0xFF0EA5E9),
-                        ],
-                      ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height)),
-                      child: Text(
-                        'TRAXA',
-                        style: TextStyle(
-                          fontSize: 42.sp,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 8.h),
-                    Text(
-                      'Academic System',
-                      style: TextStyle(
-                        fontSize: 16.sp,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade600,
-                        letterSpacing: 0.5,
                       ),
                     ),
                     SizedBox(height: 40.h),
@@ -394,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   gradient: LinearGradient(
                                     colors: [
                                       Theme.of(context).primaryColor,
-                                      const Color(0xFF0EA5E9),
+                                      const Color(0xFF6366F1),
                                     ],
                                   ),
                                   borderRadius: BorderRadius.circular(16.r),

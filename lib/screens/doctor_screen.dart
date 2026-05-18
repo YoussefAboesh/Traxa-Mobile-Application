@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../cubit/auth/auth_cubit.dart';
 import '../cubit/data/data_cubit.dart';
 import '../services/websocket_service.dart';
@@ -166,19 +165,11 @@ class _DoctorScreenState extends State<DoctorScreen> {
       setState(() => _pendingAcademicYear = '');
     });
 
+    // Session activated/ended: the Attendance screen handles its own syncing
+    // and user-facing messages, so no global snackbar here (it used to show
+    // a confusing "Session activated: Unknown").
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
-      final session = data['session'] as Map<String, dynamic>?;
-      final subjectName = session?['subjectName'] ?? 'Unknown';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Session activated: $subjectName'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
-        ),
-      );
       if (_selectedIndex == 2) {
         context.read<DataCubit>().loadAllData();
       }
@@ -186,16 +177,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
     ws.sessionEndedStream.listen((data) {
       if (!mounted) return;
-      final sessionId = data['sessionId'] as String? ?? 'Unknown';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Session ended: $sessionId'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
-        ),
-      );
       if (_selectedIndex == 2) {
         context.read<DataCubit>().loadAllData();
       }
@@ -306,17 +287,13 @@ class _DoctorScreenState extends State<DoctorScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 32.w,
-                height: 32.w,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Theme.of(context).primaryColor, const Color(0xFF0284C7)],
-                  ),
-                  borderRadius: BorderRadius.circular(8.r),
-                ),
-                child: Center(
-                  child: Icon(FontAwesomeIcons.chalkboardUser, color: Colors.white, size: 18.sp),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.r),
+                child: Image.asset(
+                  'icons/doctor_logo.png',
+                  width: 38.w,
+                  height: 38.w,
+                  fit: BoxFit.cover,
                 ),
               ),
               SizedBox(width: 8.w),

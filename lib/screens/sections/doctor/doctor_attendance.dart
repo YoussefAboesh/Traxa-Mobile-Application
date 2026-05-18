@@ -63,6 +63,11 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   bool _didCheckServer = false;
 
+  // Timestamp of the last local attendance edit. Polling skips overwriting the
+  // attendance list for a few seconds afterwards so a confirm/reject/undo does
+  // not visually "snap back" before the server has stored it.
+  DateTime? _lastLocalEdit;
+
   // صلاحيات المعيد لكل مادة (live من السيرفر) — المفتاح = subjectId كنص
   Map<String, dynamic> _taSubjectPerms = {};
 
@@ -90,6 +95,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       _loadTaPermissions();
     });
     _setupWebSocketListeners();
+    // Keep syncing with the server even when no session is open locally, so a
+    // lecture started / QR-switched / closed from the website is reflected in
+    // the app automatically — no manual refresh needed.
+    _startContinuousSync();
   }
 
   @override
@@ -164,8 +173,18 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       if (!mounted) return;
       final type = data['type'] as String?;
       final entity = data['entity'] as String?;
+      final action = data['action'] as String?;
       if (type == 'FULL_SYNC' || entity == 'attendance-session') {
         _syncWithServer();
+      }
+      // Live attendance changes (confirm / reject from the website or another
+      // device) → refresh the attendance list instantly, no manual refresh.
+      if (entity == 'active-session') {
+        if (action == 'attendance-updated') {
+          _refreshAttendanceNow();
+        } else {
+          _syncWithServer();
+        }
       }
       // تحديث صلاحيات المعيد لحظيًا من غير ما يعمل ريفريش
       if (entity == 'ta-subject-permission') {
@@ -178,14 +197,16 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   void _startConfirmTimer() {
     _confirmTimer?.cancel();
-    // Ensure sessionEndTime is set; fallback to now if missing
-    _sessionEndTime ??= DateTime.now();
+    // _sessionEndTime is the QR-phase DEADLINE (start + 30 min). The remaining
+    // time is simply (deadline - now) — NOT _qrDuration minus elapsed, which
+    // would double-count and show ~60 min instead of 30.
+    _sessionEndTime ??= DateTime.now().add(_qrDuration);
     _confirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      final remaining = _qrDuration - DateTime.now().difference(_sessionEndTime!);
+      final remaining = _sessionEndTime!.difference(DateTime.now());
       setState(() => _confirmRemaining = remaining);
       if (remaining.isNegative) {
         timer.cancel();
@@ -215,6 +236,27 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   String _fmtDur(Duration d) {
     if (d.isNegative) return '0:00';
     return '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+  }
+
+  // 12-hour clock string from an ISO timestamp ("6:39 AM"); '' if unparseable.
+  String _fmtClock(dynamic iso) {
+    final s = iso?.toString() ?? '';
+    if (s.isEmpty) return '';
+    final dt = DateTime.tryParse(s)?.toLocal();
+    if (dt == null) return '';
+    final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    return '$h:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+  }
+
+  // 12-hour clock string with seconds from a DateTime ("8:05:23 PM").
+  // Used for report time columns so the website shows a readable time
+  // instead of a raw ISO datetime.
+  String _clockString(DateTime dt) {
+    final l = dt.toLocal();
+    final h = l.hour > 12 ? l.hour - 12 : (l.hour == 0 ? 12 : l.hour);
+    final m = l.minute.toString().padLeft(2, '0');
+    final s = l.second.toString().padLeft(2, '0');
+    return '$h:$m:$s ${l.hour >= 12 ? 'PM' : 'AM'}';
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
@@ -379,6 +421,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                   DateTime.tryParse(s['startTime'] ?? s['createdAt'] ?? '') ??
                       DateTime.now();
               _sessionEndTime = isQrPhase ? qrEndTime : null;
+              // Real lecture end = when QR phase began (for report duration).
+              _lectureEndedAt = isQrPhase
+                  ? (DateTime.tryParse(s['qrPhaseStartTime'] ?? '') ?? qrEndTime)
+                  : null;
               _sessionStudents = students;
               _showActiveSessions = true;
               if (isQrPhase) {
@@ -470,6 +516,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           _activeSessionId = serverSessionId;
           _sessionStartTime = DateTime.tryParse(s['startTime'] ?? s['createdAt'] ?? '') ?? DateTime.now();
           _sessionEndTime = isQrPhase ? qrEndTime : null;
+          _lectureEndedAt = isQrPhase
+              ? (DateTime.tryParse(s['qrPhaseStartTime'] ?? '') ?? qrEndTime)
+              : null;
           _sessionStudents = students;
           _showActiveSessions = true;
           if (isQrPhase) _confirmRemaining = qrRemaining;
@@ -500,6 +549,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         setState(() {
           _phase = SessionPhase.confirming;
           _sessionEndTime = qrEndTime;
+          _lectureEndedAt ??=
+              DateTime.tryParse(s['qrPhaseStartTime'] ?? '') ?? DateTime.now();
           _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
         });
         _startConfirmTimer();
@@ -509,13 +560,15 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   void _resetSession() {
-    _syncTimer?.cancel();
+    // Note: _syncTimer keeps running so the app still picks up a new session
+    // started from the website without needing a manual refresh.
     setState(() {
       _phase = SessionPhase.none;
       _activeSession = null;
       _activeSessionId = null;
       _sessionStartTime = null;
       _sessionEndTime = null;
+      _lectureEndedAt = null;
       _sessionStudents = null;
       _confirmedCount = 0;
       _pendingCount = 0;
@@ -590,6 +643,17 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     }
 
     try {
+      // ✅ Check enrolled students FIRST — refuse to activate an empty session.
+      final students = await _getEnrolledStudents(lecture.subjectId, token);
+      if (!mounted) return;
+      if (students.isEmpty) {
+        _snack(
+            'No students are registered for this ${_term.toLowerCase()} yet',
+            Colors.orange);
+        setState(() => _isActivating = false);
+        return;
+      }
+
       final sessionId =
           'SES-${DateTime.now().millisecondsSinceEpoch}-${lecture.id}';
       final now = DateTime.now();
@@ -662,9 +726,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         camOk = jsonDecode(cr.body)['success'] == true;
       } catch (_) {}
 
-      // Get enrolled students (from cache or API)
-      final students = await _getEnrolledStudents(lecture.subjectId, token);
-
       if (!mounted) return;
 
       setState(() {
@@ -673,6 +734,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         _activeSessionId = sessionId;
         _sessionStartTime = now;
         _sessionEndTime = null;
+        _lectureEndedAt = null;
         _sessionStudents = students;
         _showActiveSessions = true;
         _showStudentList = false;
@@ -769,10 +831,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
     // Snapshot session data before we clear state
     final sessionIdSnapshot = _activeSessionId;
-    final sessionStudentsSnapshot = List<Student>.from(_sessionStudents ?? []);
-    final attendanceSnapshot = List<Map<String, dynamic>>.from(_attendanceRecords);
-    final confirmedSnapshot = _confirmedCount;
-    final pendingSnapshot = _pendingCount;
+    var sessionStudentsSnapshot = List<Student>.from(_sessionStudents ?? []);
+    var attendanceSnapshot = List<Map<String, dynamic>>.from(_attendanceRecords);
 
     Map<String, dynamic>? report;
 
@@ -787,9 +847,52 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           .timeout(const Duration(seconds: 10));
 
       print('Delete session response: ${deleteRes.statusCode}');
+
+      // ── Already closed elsewhere (website / another device) ───────────
+      // That device already saved the report — don't send a duplicate
+      // (which, with stale state, comes out empty / "unknown" students).
+      if (deleteRes.statusCode == 404) {
+        print('Session already closed elsewhere — skipping duplicate report');
+        _isFinalizing = false;
+        if (mounted) {
+          _resetSession();
+          _snack('Session closed', const Color(0xFF0EA5E9));
+          _startContinuousSync();
+        }
+        return;
+      }
       if (deleteRes.statusCode != 200 && deleteRes.statusCode != 204) {
         print('⚠️ Session delete returned ${deleteRes.statusCode}: ${deleteRes.body}');
       }
+
+      // If the student list wasn't loaded yet (e.g. session was restored from
+      // the website), fetch it now so the report isn't empty.
+      if (sessionStudentsSnapshot.isEmpty && _activeSession != null) {
+        sessionStudentsSnapshot =
+            await _getEnrolledStudents(_activeSession!.subjectId, auth.token!);
+      }
+
+      // Pull the freshest attendance records straight from the server before
+      // building the report. This guarantees the report's present/pending
+      // counts match reality even if a confirm/reject happened on the website
+      // and the local poll hadn't synced it yet.
+      try {
+        final freshRes = await http
+            .get(
+              Uri.parse(
+                  '${AppConstants.baseUrl}/api/attendance-session-data/$sessionIdSnapshot'),
+              headers: _headers(auth.token!),
+            )
+            .timeout(const Duration(seconds: 6));
+        if (freshRes.statusCode == 200) {
+          final freshData = jsonDecode(freshRes.body);
+          final freshRecs = (freshData['records'] as List?)
+              ?.cast<Map<String, dynamic>>();
+          if (freshRecs != null && freshRecs.isNotEmpty) {
+            attendanceSnapshot = freshRecs;
+          }
+        }
+      } catch (_) {}
 
       // Build report using snapshots (safe even if state is cleared mid-flight)
       final rptStudents = sessionStudentsSnapshot.map((s) {
@@ -798,13 +901,21 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                 .firstWhere(
                     (r) =>
                         r?['student_id'] == s.id ||
+                        r?['studentId'] == s.id ||
                         r?['student_id_number'] == s.studentId,
                     orElse: () => null);
 
-            final faceAt = rec?['face_detected_at'] ?? rec?['created_at'] ?? '';
-            final qrAt = rec?['confirmed_at'] ?? rec?['qr_scanned_at'] ?? '';
+            // Face = real camera face-detection only.
+            final faceAt = (rec?['face_detected_at'] ?? '').toString();
+            // QR = a real QR scan only — a manual confirmation is NOT a QR.
+            final didQr = rec?['confirmedByQR'] == true ||
+                (rec?['qr_scanned_at']?.toString().isNotEmpty ?? false);
+            final qrAt = didQr
+                ? (rec?['qr_scanned_at'] ?? rec?['confirmed_at'] ?? '')
+                    .toString()
+                : '';
             String? dur;
-            if (faceAt.toString().isNotEmpty && qrAt.toString().isNotEmpty) {
+            if (faceAt.isNotEmpty && qrAt.isNotEmpty) {
               try {
                 final d = DateTime.parse(qrAt).difference(DateTime.parse(faceAt));
                 dur = d.inHours > 0
@@ -814,41 +925,94 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             }
 
             return {
-              'student_id': s.id,
+              // Every alias both platforms might read, so the report renders
+              // identically on the app and the website.
+              // ⚠️ The id-ish fields carry the STUDENT CODE (not the internal
+              // db id) because the website matches report students against
+              // its enrollment list (approved_subjects) by student code.
+              // Sending the internal id here made the website filter the
+              // report down to 0 enrolled students.
+              'student_id': s.studentId,
+              'studentId': s.studentId,
               'student_id_number': s.studentId,
+              'studentIdNumber': s.studentId,
+              'id': s.id,
+              'studentDbId': s.id,
               'student_name': s.name,
+              'studentName': s.name,
+              'name': s.name,
               'status': rec?['status'] ?? 'absent',
               'face_detected_at': faceAt,
               'qr_scanned_at': qrAt,
+              'confirmedByQR': didQr,
               'confirmed_by': rec?['confirmed_by'],
               'attendance_duration': dur,
             };
           }).toList();
 
+      // ── Counts: derived from the SAME student list that goes into the
+      // report, so the numbers and the rows can never disagree. ───────────
+      final confirmedSnapshot =
+          rptStudents.where((s) => s['status'] == 'confirmed').length;
+      final pendingSnapshot =
+          rptStudents.where((s) => s['status'] == 'pending').length;
+      final absentCnt = rptStudents.length - confirmedSnapshot - pendingSnapshot;
+      final ratePct = rptStudents.isEmpty
+          ? 0
+          : (confirmedSnapshot / rptStudents.length * 100).round();
+
       final nowIso = DateTime.now().toIso8601String();
       // Real lecture end time = when the user pressed End. Falls back to
       // the QR phase deadline (`_sessionEndTime`) only if for some reason
       // the click time wasn't captured.
-      final lectureEndIso = (_lectureEndedAt ?? _sessionEndTime ?? DateTime.now())
-          .toIso8601String();
+      final lectureEndDt = _lectureEndedAt ?? _sessionEndTime ?? DateTime.now();
+      final lectureEndIso = lectureEndDt.toIso8601String();
+      final startDt = _sessionStartTime ?? DateTime.now();
+      // YYYY-MM-DD — universally parseable for the website's DATE column.
+      final dateOnly =
+          '${startDt.year}-${startDt.month.toString().padLeft(2, '0')}-${startDt.day.toString().padLeft(2, '0')}';
+      // Clean 12-hour clock strings (e.g. "8:05:23 PM") for the website's
+      // TIME column — sent in `startTime`/`endTime` so the website renders a
+      // readable time instead of a raw ISO datetime. ISO copies are kept in
+      // `startTimeIso`/`endTimeIso` for any consumer that needs to parse them.
+      final startClock = _clockString(startDt);
+      final endClock = _clockString(lectureEndDt);
       report = {
         'sessionId': sessionIdSnapshot,
         'lectureId': _activeSession?.id,
         'doctorId': _ownerId(auth.user),
         'doctorName': auth.user?.name,
         'subjectName': _activeSession?.subjectName,
+        'subject': _activeSession?.subjectName,
         'level': _activeSession?.level,
         'department': _activeSession?.department,
-        // Match the field names the website / server use, so the same JSON
-        // renders identically on both platforms.
-        'startTime': _sessionStartTime?.toIso8601String(),
-        'endTime': lectureEndIso,
+        // Clean time strings for display columns.
+        'startTime': startClock,
+        'endTime': endClock,
+        'startTimeIso': _sessionStartTime?.toIso8601String(),
+        'endTimeIso': lectureEndIso,
         'createdAt': nowIso,
         'endedAt': lectureEndIso,
-        'totalStudents': sessionStudentsSnapshot.length,
+        // ── Website section-report table columns ──────────────────────
+        'date': dateOnly,
+        'time': startClock,
+        // ── Counts: send every alias both platforms might read ────────
+        'totalStudents': rptStudents.length,
+        'total_students': rptStudents.length,
+        'enrolled': rptStudents.length,
+        'enrolled_count': rptStudents.length,
         'presentCount': confirmedSnapshot,
+        'present_count': confirmedSnapshot,
+        'present': confirmedSnapshot,
+        'confirmed': confirmedSnapshot,
         'pendingCount': pendingSnapshot,
-        'absentCount': sessionStudentsSnapshot.length - confirmedSnapshot - pendingSnapshot,
+        'pending_count': pendingSnapshot,
+        'pending': pendingSnapshot,
+        'absentCount': absentCnt,
+        'absent_count': absentCnt,
+        'absent': absentCnt,
+        'rate': ratePct,
+        'presentRate': ratePct,
         'students': rptStudents,
       };
 
@@ -893,6 +1057,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       });
 
       _snack('Camera closed - Report saved', const Color(0xFF0EA5E9));
+      // Resume background sync so a new session opened anywhere is picked up.
+      _startContinuousSync();
     }
   }
 
@@ -947,9 +1113,13 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
           if (sessionPhase == 'qr' && _phase == SessionPhase.active && qrEndTime != null) {
             final remaining = qrEndTime.difference(DateTime.now());
+            final qrStartStr = (data['session']?['qrPhaseStartTime'] ??
+                data['qrPhaseStartTime']) as String?;
             setState(() {
               _phase = SessionPhase.confirming;
               _sessionEndTime = qrEndTime;
+              _lectureEndedAt ??=
+                  DateTime.tryParse(qrStartStr ?? '') ?? DateTime.now();
               _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
               _attendanceRecords = recs;
               _confirmedCount = recs.where((r) => r['status'] == 'confirmed').length;
@@ -957,7 +1127,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             });
             _startConfirmTimer();
             _snack('QR mode synced from server', Colors.orange);
-          } else {
+          } else if (!_recentLocalEdit) {
+            // Skip overwriting the list right after a local edit.
             setState(() {
               _attendanceRecords = recs;
               _confirmedCount =
@@ -971,82 +1142,152 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   // ============================================
-  // Manual Attendance Confirmation
+  // Manual Attendance — managed client-side and POSTed as a whole to
+  // /api/attendance-session-data (the same store the camera + website use),
+  // because the server has no per-student manual-attendance endpoint. The
+  // action mirrors instantly to the website (server broadcasts
+  // attendance-updated) and vice-versa.
   // ============================================
-  Future<void> _confirmStudent(Student student) async {
+  Future<void> _pushAttendance(List<Map<String, dynamic>> records) async {
     if (_activeSessionId == null) return;
     final auth = context.read<AuthCubit>().state;
     if (auth.token == null) return;
+    final pending = records.where((r) => r['status'] == 'pending').toList();
+    _lastLocalEdit = DateTime.now();
+    setState(() {
+      _attendanceRecords = records;
+      _confirmedCount = records.where((r) => r['status'] == 'confirmed').length;
+      _pendingCount = pending.length;
+    });
     try {
       await http.post(
-        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/manual-attendance'),
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/attendance-session-data/$_activeSessionId'),
         headers: _headers(auth.token!),
         body: jsonEncode({
-          'studentId': student.id,
-          'studentIdNumber': student.studentId,
-          'action': 'confirm',
+          'records': records,
+          'pending': pending,
+          'lastUpdate': DateTime.now().toIso8601String(),
         }),
       ).timeout(const Duration(seconds: 8));
-      _refreshAttendanceNow();
-    } catch (e) {
-      _snack('Error confirming student', Colors.red);
+    } catch (_) {
+      _snack('Error syncing attendance', Colors.red);
     }
   }
 
-  Future<void> _rejectStudent(Student student) async {
-    if (_activeSessionId == null) return;
-    final auth = context.read<AuthCubit>().state;
-    if (auth.token == null) return;
-    try {
-      await http.post(
-        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/manual-attendance'),
-        headers: _headers(auth.token!),
-        body: jsonEncode({
-          'studentId': student.id,
-          'studentIdNumber': student.studentId,
-          'action': 'reject',
-        }),
-      ).timeout(const Duration(seconds: 8));
-      _refreshAttendanceNow();
-    } catch (e) {
-      _snack('Error rejecting student', Colors.red);
-    }
+  // Current record / status of a student from the live records.
+  Map<String, dynamic>? _recOf(Student s) =>
+      _attendanceRecords.cast<Map<String, dynamic>?>().firstWhere(
+            (r) =>
+                r?['student_id'] == s.id ||
+                r?['studentId'] == s.id ||
+                r?['student_id_number'] == s.studentId,
+            orElse: () => null,
+          );
+
+  String _statusOf(Student s) => (_recOf(s)?['status'] ?? 'absent').toString();
+
+  // Has the doctor already acted on this student → row shows "Undo".
+  bool _isActedOn(Student s) {
+    final rec = _recOf(s);
+    if (rec == null) return false;
+    return rec['status'] == 'confirmed' || rec['rejected'] == true;
   }
 
-  Future<void> _confirmAllPending() async {
-    if (_activeSessionId == null) return;
+  // Builds a record for a student, merging any existing record so camera/QR
+  // data (face time, QR flag, etc.) is preserved.
+  Map<String, dynamic> _recordFor(Student s, String status,
+      {bool rejected = false}) {
+    final existing = _recOf(s);
+    final rec = existing != null
+        ? Map<String, dynamic>.from(existing)
+        : <String, dynamic>{};
     final auth = context.read<AuthCubit>().state;
-    if (auth.token == null) return;
-    try {
-      await http.post(
-        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/confirm-all-pending'),
-        headers: _headers(auth.token!),
-      ).timeout(const Duration(seconds: 8));
-      _snack('All pending confirmed', Colors.green);
-      _refreshAttendanceNow();
-    } catch (e) {
-      _snack('Error confirming all', Colors.red);
+    final now = DateTime.now().toIso8601String();
+    rec['student_id'] = s.id;
+    rec['studentId'] = s.id;
+    rec['student_id_number'] = s.studentId;
+    rec['student_name'] = s.name;
+    rec['studentName'] = s.name;
+    rec['status'] = status;
+    rec['confirmed'] = status == 'confirmed';
+    // No comment is attached — confirm/reject is a final action.
+    rec.remove('comment');
+    if (status == 'confirmed') {
+      rec['rejected'] = false;
+      // A real QR scan keeps its method; otherwise this is a Manual confirm.
+      rec['method'] = rec['confirmedByQR'] == true ? 'QR' : 'Manual';
+      rec['confirmed_at'] = rec['confirmed_at'] ?? now;
+      rec['confirmedAt'] = rec['confirmed_at'];
+      rec['confirmed_by'] = auth.user?.name ?? 'Doctor';
+    } else if (rejected) {
+      rec['rejected'] = true;
+      rec['method'] = 'Manual';
+      rec['confirmed'] = false;
+      rec['rejected_at'] = now;
+      rec.remove('confirmed_at');
+      rec.remove('confirmedAt');
     }
+    return rec;
   }
 
-  Future<void> _rejectAllPending() async {
-    if (_activeSessionId == null) return;
-    final auth = context.read<AuthCubit>().state;
-    if (auth.token == null) return;
-    try {
-      await http.post(
-        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/reject-all-pending'),
-        headers: _headers(auth.token!),
-      ).timeout(const Duration(seconds: 8));
-      _snack('All pending rejected', Colors.red);
-      _refreshAttendanceNow();
-    } catch (e) {
-      _snack('Error rejecting all', Colors.red);
+  Future<void> _applyStatus(Student student, String status,
+      {bool rejected = false}) async {
+    final list = _attendanceRecords
+        .map((r) => Map<String, dynamic>.from(r))
+        .where((r) =>
+            r['student_id'] != student.id &&
+            r['studentId'] != student.id &&
+            r['student_id_number'] != student.studentId)
+        .toList();
+    if (status == 'confirmed' || rejected) {
+      list.add(_recordFor(student, status, rejected: rejected));
     }
+    await _pushAttendance(list);
   }
+
+  Future<void> _confirmStudent(Student s) => _applyStatus(s, 'confirmed');
+
+  Future<void> _rejectStudent(Student s) =>
+      _applyStatus(s, 'absent', rejected: true);
+
+  // Confirm All / Reject All operate ONLY on pending students.
+  Future<void> _bulkPending(bool confirm) async {
+    final pending = (_sessionStudents ?? [])
+        .where((s) => _statusOf(s) == 'pending')
+        .toList();
+    if (pending.isEmpty) {
+      _snack('No pending students', Colors.orange);
+      return;
+    }
+    final list =
+        _attendanceRecords.map((r) => Map<String, dynamic>.from(r)).toList();
+    for (final s in pending) {
+      list.removeWhere((r) =>
+          r['student_id'] == s.id ||
+          r['studentId'] == s.id ||
+          r['student_id_number'] == s.studentId);
+      list.add(confirm
+          ? _recordFor(s, 'confirmed')
+          : _recordFor(s, 'absent', rejected: true));
+    }
+    await _pushAttendance(list);
+    _snack(
+        '${pending.length} pending student(s) ${confirm ? 'confirmed' : 'rejected'}',
+        confirm ? Colors.green : Colors.red);
+  }
+
+  Future<void> _confirmAllPending() => _bulkPending(true);
+  Future<void> _rejectAllPending() => _bulkPending(false);
+
+  // True for a few seconds after a local confirm/reject/undo — used so polling
+  // does not overwrite the just-edited list with stale server data.
+  bool get _recentLocalEdit =>
+      _lastLocalEdit != null &&
+      DateTime.now().difference(_lastLocalEdit!) < const Duration(seconds: 3);
 
   Future<void> _refreshAttendanceNow() async {
-    if (_activeSessionId == null) return;
+    if (_activeSessionId == null || _recentLocalEdit) return;
     final auth = context.read<AuthCubit>().state;
     if (auth.token == null) return;
     try {
@@ -1069,6 +1310,71 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   // ============================================
   // Dialogs
   // ============================================
+  // Manual confirm / reject dialog. [action] is 'confirm' or 'reject'.
+  // This action is FINAL — once confirmed or rejected it cannot be undone.
+  void _showManualAttendanceDialog(Student student, String action) {
+    final isConfirm = action == 'confirm';
+    final accent =
+        isConfirm ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final title =
+        isConfirm ? 'Confirm Attendance Manually' : 'Reject Attendance';
+    final body = isConfirm
+        ? 'Confirm attendance for ${student.name}? This marks the student as present. This action is final and cannot be undone.'
+        : 'Reject attendance for ${student.name}? This marks the student as absent. This action is final and cannot be undone.';
+    final icon = isConfirm ? Icons.check : Icons.close;
+    final btnLabel = isConfirm ? 'Confirm Attendance' : 'Reject Attendance';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24.r)),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48.w,
+              height: 48.w,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+              child: Icon(icon, color: Colors.white, size: 26.sp),
+            ),
+            SizedBox(height: 12.h),
+            Text(title,
+                textAlign: TextAlign.center,
+                style:
+                    TextStyle(fontWeight: FontWeight.bold, fontSize: 17.sp)),
+          ],
+        ),
+        content: Text(
+          body,
+          textAlign: TextAlign.center,
+          style:
+              TextStyle(fontSize: 13.sp, color: Theme.of(context).hintColor),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (isConfirm) {
+                _confirmStudent(student);
+              } else {
+                _rejectStudent(student);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12.r))),
+            child: Text(btnLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showActivateConfirmDialog(Lecture lecture) {
     showDialog(
       context: context,
@@ -1802,21 +2108,14 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                     ),
                     child: Row(children: [
                       Expanded(
-                          flex: 2,
-                          child: Text('ID',
-                              style: TextStyle(
-                                  fontSize: 10.sp,
-                                  fontWeight: FontWeight.bold,
-                                  color: const Color(0xFF0EA5E9)))),
-                      Expanded(
-                          flex: 3,
-                          child: Text('NAME',
+                          flex: 5,
+                          child: Text('STUDENT',
                               style: TextStyle(
                                   fontSize: 10.sp,
                                   fontWeight: FontWeight.bold,
                                   color: const Color(0xFF0EA5E9)))),
                       SizedBox(
-                          width: 60.w,
+                          width: 62.w,
                           child: Text('STATUS',
                               style: TextStyle(
                                   fontSize: 10.sp,
@@ -1824,7 +2123,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                                   color: const Color(0xFF0EA5E9)),
                               textAlign: TextAlign.center)),
                       SizedBox(
-                          width: 68.w,
+                          width: 86.w,
                           child: Text('ACTIONS',
                               style: TextStyle(
                                   fontSize: 10.sp,
@@ -1834,14 +2133,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                     ]),
                   ),
                   ..._sessionStudents!.map((student) {
-                    final rec = _attendanceRecords
-                        .cast<Map<String, dynamic>?>()
-                        .firstWhere(
-                            (r) =>
-                                r?['student_id'] == student.id ||
-                                r?['student_id_number'] == student.studentId,
-                            orElse: () => null);
-                    final status = rec?['status'] ?? 'absent';
+                    final rec = _recOf(student);
+                    final status = (rec?['status'] ?? 'absent').toString();
+                    final acted = _isActedOn(student);
                     final statusColor = status == 'confirmed'
                         ? const Color(0xFF10B981)
                         : status == 'pending'
@@ -1852,6 +2146,22 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                         : status == 'pending'
                             ? 'Pending'
                             : 'Absent';
+                    // METHOD • TIME subtitle line
+                    String subtitle = student.studentId;
+                    if (status == 'confirmed') {
+                      final m = rec?['confirmedByQR'] == true
+                          ? 'QR'
+                          : (rec?['method'] ?? 'Manual').toString();
+                      final t = _fmtClock(
+                          rec?['confirmed_at'] ?? rec?['confirmedAt']);
+                      subtitle = t.isEmpty
+                          ? '${student.studentId}  •  $m'
+                          : '${student.studentId}  •  $m  •  $t';
+                    } else if (rec?['rejected'] == true) {
+                      subtitle = '${student.studentId}  •  Rejected manually';
+                    } else if (status == 'pending') {
+                      subtitle = '${student.studentId}  •  Face detected';
+                    }
 
                     return Container(
                       padding: EdgeInsets.symmetric(
@@ -1865,80 +2175,121 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                       ),
                       child: Row(children: [
                         Expanded(
-                            flex: 2,
-                            child: Text(student.studentId,
-                                style: TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 10.sp,
-                                    color: const Color(0xFF0EA5E9)))),
-                        Expanded(
-                            flex: 3,
-                            child: Text(student.name,
-                                style: TextStyle(
-                                    fontSize: 11.sp,
-                                    color: _isDark
-                                        ? Colors.white
-                                        : const Color(0xFF1E293B)))),
+                          flex: 5,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(student.name,
+                                  style: TextStyle(
+                                      fontSize: 11.sp,
+                                      fontWeight: FontWeight.w600,
+                                      color: _isDark
+                                          ? Colors.white
+                                          : const Color(0xFF1E293B))),
+                              SizedBox(height: 2.h),
+                              Text(subtitle,
+                                  style: TextStyle(
+                                      fontSize: 9.sp,
+                                      color: const Color(0xFF94A3B8))),
+                            ],
+                          ),
+                        ),
                         SizedBox(
-                          width: 60.w,
+                          width: 62.w,
                           child: Container(
                             padding: EdgeInsets.symmetric(
-                                horizontal: 4.w, vertical: 2.h),
+                                horizontal: 4.w, vertical: 3.h),
                             decoration: BoxDecoration(
                                 color: statusColor.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(10.r)),
                             child: Text(statusLabel,
                                 style: TextStyle(
                                     fontSize: 9.sp,
-                                    fontWeight: FontWeight.w500,
+                                    fontWeight: FontWeight.w600,
                                     color: statusColor),
                                 textAlign: TextAlign.center),
                           ),
                         ),
                         SizedBox(
-                          width: 68.w,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (status != 'confirmed')
-                                GestureDetector(
-                                  onTap: () => _confirmStudent(student),
+                          width: 86.w,
+                          child: acted
+                              ? Center(
                                   child: Container(
-                                    width: 28.w,
-                                    height: 28.w,
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 10.w, vertical: 6.h),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(8.r),
+                                      color: statusColor.withValues(
+                                          alpha: 0.15),
+                                      borderRadius:
+                                          BorderRadius.circular(8.r),
                                     ),
-                                    child: Icon(Icons.check,
-                                        size: 16.sp, color: const Color(0xFF10B981)),
-                                  ),
-                                ),
-                              if (status != 'confirmed') SizedBox(width: 4.w),
-                              if (status != 'absent')
-                                GestureDetector(
-                                  onTap: () => _rejectStudent(student),
-                                  child: Container(
-                                    width: 28.w,
-                                    height: 28.w,
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(8.r),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.lock_outline,
+                                            size: 13.sp, color: statusColor),
+                                        SizedBox(width: 4.w),
+                                        Text('Final',
+                                            style: TextStyle(
+                                                fontSize: 10.sp,
+                                                fontWeight: FontWeight.bold,
+                                                color: statusColor)),
+                                      ],
                                     ),
-                                    child: Icon(Icons.close,
-                                        size: 16.sp, color: Colors.red),
                                   ),
+                                )
+                              : Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () =>
+                                          _showManualAttendanceDialog(
+                                              student, 'confirm'),
+                                      child: Container(
+                                        width: 30.w,
+                                        height: 30.w,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981)
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(8.r),
+                                        ),
+                                        child: Icon(Icons.check,
+                                            size: 17.sp,
+                                            color:
+                                                const Color(0xFF10B981)),
+                                      ),
+                                    ),
+                                    SizedBox(width: 6.w),
+                                    GestureDetector(
+                                      onTap: () =>
+                                          _showManualAttendanceDialog(
+                                              student, 'reject'),
+                                      child: Container(
+                                        width: 30.w,
+                                        height: 30.w,
+                                        decoration: BoxDecoration(
+                                          color: Colors.red
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(8.r),
+                                        ),
+                                        child: Icon(Icons.close,
+                                            size: 17.sp,
+                                            color: Colors.red),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                            ],
-                          ),
                         ),
                       ]),
                     );
                   }),
-                  // Bulk action buttons
-                  if (_pendingCount > 0)
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
+                  // Bulk action buttons — operate on PENDING students only.
+                  Container(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 12.w, vertical: 10.h),
                       decoration: BoxDecoration(
                         color: _isDark
                             ? Colors.white.withValues(alpha: 0.03)
@@ -1951,12 +2302,14 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: _confirmAllPending,
-                            icon: Icon(Icons.check_circle_outline, size: 14.sp),
+                            icon: Icon(Icons.check_circle_outline,
+                                size: 14.sp),
                             label: Text('Confirm All Pending',
-                                style: TextStyle(fontSize: 11.sp)),
+                                style: TextStyle(fontSize: 10.sp)),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFF10B981),
-                              side: const BorderSide(color: Color(0xFF10B981)),
+                              side: const BorderSide(
+                                  color: Color(0xFF10B981)),
                               padding: EdgeInsets.symmetric(vertical: 8.h),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8.r)),
@@ -1969,7 +2322,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                             onPressed: _rejectAllPending,
                             icon: Icon(Icons.cancel_outlined, size: 14.sp),
                             label: Text('Reject All Pending',
-                                style: TextStyle(fontSize: 11.sp)),
+                                style: TextStyle(fontSize: 10.sp)),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.red,
                               side: const BorderSide(color: Colors.red),

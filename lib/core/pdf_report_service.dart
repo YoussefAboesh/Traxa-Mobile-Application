@@ -31,9 +31,19 @@ class PdfReportService {
           .toString();
       final createdAt = startTime.isNotEmpty ? startTime : endTime;
       final endedAt = endTime;
-      final totalStudents = report['totalStudents'] ?? 0;
-      final presentCount = report['presentCount'] ?? 0;
-      final pendingCount = report['pendingCount'] ?? 0;
+      final students0 = (report['students'] as List?) ?? [];
+      final totalStudents = report['totalStudents'] ??
+          report['total_students'] ??
+          report['enrolled'] ??
+          students0.length;
+      final presentCount = report['presentCount'] ??
+          report['present_count'] ??
+          report['present'] ??
+          students0.where((s) => s['status'] == 'confirmed').length;
+      final pendingCount = report['pendingCount'] ??
+          report['pending_count'] ??
+          report['pending'] ??
+          students0.where((s) => s['status'] == 'pending').length;
       final absentCount = totalStudents - presentCount - pendingCount;
       final students = (report['students'] as List?)?.cast<Map<String, dynamic>>() ?? [];
       final level = report['level'] ?? '';
@@ -43,7 +53,18 @@ class PdfReportService {
       pdf.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(40),
-        header: (ctx) => _header(subjectName, subjectCode, doctorName, _dateOnly(createdAt)),
+        header: (ctx) => _header(
+            subjectName,
+            subjectCode,
+            doctorName,
+            // Use a reliable full timestamp for the header date so it never
+            // renders a bare time (website reports may put a time in
+            // startTime).
+            _dateOnly((report['createdAt'] ??
+                    report['created_at'] ??
+                    report['date'] ??
+                    createdAt)
+                .toString())),
         footer: (ctx) => pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
@@ -167,40 +188,138 @@ class PdfReportService {
         style: pw.TextStyle(color: PdfColors.grey500));
     }
 
-    return pw.TableHelper.fromTextArray(
-      headers: ['#', 'Student ID', 'Name', 'Status', 'Face', 'QR', 'Duration'],
-      headerDecoration: pw.BoxDecoration(color: PdfColor.fromHex('#8B5CF6')),
-      headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-      cellStyle: const pw.TextStyle(fontSize: 8),
-      cellAlignment: pw.Alignment.centerLeft,
-      headerAlignment: pw.Alignment.centerLeft,
-      columnWidths: {
-        0: const pw.FixedColumnWidth(25),
-        1: const pw.FixedColumnWidth(70),
-        2: const pw.FlexColumnWidth(3),
-        3: const pw.FixedColumnWidth(50),
-        4: const pw.FixedColumnWidth(55),
-        5: const pw.FixedColumnWidth(55),
-        6: const pw.FixedColumnWidth(50),
-      },
-      cellDecoration: (index, data, rowNum) => pw.BoxDecoration(color: rowNum % 2 == 0 ? PdfColors.grey100 : PdfColors.white),
-      data: students.asMap().entries.map((e) {
-        final i = e.key;
-        final s = e.value;
-        final status = s['status'] ?? 'absent';
-        final faceTime = _time12(s['face_detected_at'] ?? s['created_at'] ?? s['date'] ?? '');
-        final qrTime = _time12(s['confirmed_at'] ?? s['qr_scanned_at'] ?? '');
-        final duration = s['attendance_duration'] ?? '-';
-        return [
-          '${i + 1}',
-          s['student_id_number']?.toString() ?? '',
-          s['student_name'] ?? s['name'] ?? '',
-          status == 'confirmed' ? 'Present' : status == 'pending' ? 'Pending' : 'Absent',
-          faceTime,
-          qrTime,
-          duration.toString(),
-        ];
-      }).toList(),
+    const headers = ['#', 'Student ID', 'Name', 'Status', 'Face ID', 'QR', 'Duration'];
+    final widths = {
+      0: const pw.FixedColumnWidth(24),
+      1: const pw.FixedColumnWidth(62),
+      2: const pw.FlexColumnWidth(3),
+      3: const pw.FixedColumnWidth(52),
+      4: const pw.FixedColumnWidth(44),
+      5: const pw.FixedColumnWidth(40),
+      6: const pw.FixedColumnWidth(58),
+    };
+
+    // A plain padded text cell.
+    pw.Widget cell(String text,
+        {PdfColor? color,
+        bool bold = false,
+        pw.Alignment align = pw.Alignment.centerLeft}) {
+      return pw.Container(
+        alignment: align,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+        child: pw.Text(text,
+            style: pw.TextStyle(
+                fontSize: 8,
+                color: color ?? PdfColors.black,
+                fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+      );
+    }
+
+    final rows = <pw.TableRow>[
+      // Header
+      pw.TableRow(
+        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#8B5CF6')),
+        children: headers
+            .map((h) => pw.Container(
+                  padding:
+                      const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  child: pw.Text(h,
+                      style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.white)),
+                ))
+            .toList(),
+      ),
+    ];
+
+    for (var i = 0; i < students.length; i++) {
+      final s = students[i];
+      final status = (s['status'] ?? 'absent').toString();
+
+      // ── Face ID & QR: did the student actually do each step? ──────────
+      final faceRaw = (s['face_detected_at'] ?? '').toString();
+      final qrRaw = (s['qr_scanned_at'] ??
+              (s['confirmedByQR'] == true ? (s['confirmed_at'] ?? '') : '') ??
+              '')
+          .toString();
+      final hasFace = faceRaw.isNotEmpty;
+      final hasQr = qrRaw.isNotEmpty || s['confirmedByQR'] == true;
+
+      // ── Duration = QR time − Face time, ONLY when the student did both.
+      // If only one (or neither) happened the student is still Pending and
+      // no duration is calculated.
+      String duration = '-';
+      if (hasFace && qrRaw.isNotEmpty) {
+        final f = DateTime.tryParse(faceRaw);
+        final q = DateTime.tryParse(qrRaw);
+        if (f != null && q != null) {
+          var diff = q.difference(f);
+          if (diff.isNegative) diff = f.difference(q);
+          final m = diff.inMinutes;
+          final sec = diff.inSeconds % 60;
+          duration = m > 0 ? '${m}m ${sec}s' : '${sec}s';
+        }
+      }
+
+      // ── Status colour: green / yellow / red ───────────────────────────
+      PdfColor statusBg;
+      String statusLabel;
+      if (status == 'confirmed') {
+        statusBg = PdfColor.fromHex('#10B981');
+        statusLabel = 'Present';
+      } else if (status == 'pending') {
+        statusBg = PdfColor.fromHex('#F59E0B');
+        statusLabel = 'Pending';
+      } else {
+        statusBg = PdfColor.fromHex('#EF4444');
+        statusLabel = 'Absent';
+      }
+
+      rows.add(pw.TableRow(
+        decoration: pw.BoxDecoration(
+            color: i % 2 == 0 ? PdfColors.grey100 : PdfColors.white),
+        children: [
+          cell('${i + 1}', align: pw.Alignment.center),
+          cell((s['student_id_number'] ??
+                  s['studentIdNumber'] ??
+                  s['studentId'] ??
+                  s['student_id'] ??
+                  '')
+              .toString()),
+          cell((s['student_name'] ??
+                  s['studentName'] ??
+                  s['name'] ??
+                  'Unknown')
+              .toString()),
+          // Coloured status cell — the most important column.
+          pw.Container(
+            alignment: pw.Alignment.center,
+            color: statusBg,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+            child: pw.Text(statusLabel,
+                style: pw.TextStyle(
+                    fontSize: 8,
+                    color: PdfColors.white,
+                    fontWeight: pw.FontWeight.bold)),
+          ),
+          cell(hasFace ? 'Yes' : 'No',
+              color: hasFace ? PdfColor.fromHex('#10B981') : PdfColors.red,
+              bold: true,
+              align: pw.Alignment.center),
+          cell(hasQr ? 'Yes' : 'No',
+              color: hasQr ? PdfColor.fromHex('#10B981') : PdfColors.red,
+              bold: true,
+              align: pw.Alignment.center),
+          cell(duration, align: pw.Alignment.center),
+        ],
+      ));
+    }
+
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+      columnWidths: widths,
+      children: rows,
     );
   }
 

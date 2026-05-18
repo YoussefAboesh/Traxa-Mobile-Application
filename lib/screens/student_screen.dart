@@ -314,17 +314,13 @@ class _StudentScreenState extends State<StudentScreen> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 32.w,
-              height: 32.w,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
-                ),
-                borderRadius: BorderRadius.circular(8.r),
-              ),
-              child: Center(
-                child: FaIcon(FontAwesomeIcons.userGraduate, color: Colors.white, size: 18.sp),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8.r),
+              child: Image.asset(
+                'icons/student_logo.jpg',
+                width: 38.w,
+                height: 38.w,
+                fit: BoxFit.cover,
               ),
             ),
             SizedBox(width: 8.w),

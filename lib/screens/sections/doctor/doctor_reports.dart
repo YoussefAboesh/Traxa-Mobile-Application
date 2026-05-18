@@ -28,6 +28,17 @@ class _DoctorReportsState extends State<DoctorReports> {
   StreamSubscription? _reportSavedSub;
   StreamSubscription? _sessionEndedSub;
 
+  // ── Filters (search bar like the website) ──────────────────────────────
+  String? _filterSubject; // null = All Subjects
+  int? _filterLevel; // null = All Levels
+  DateTime? _filterDate; // null = any date
+
+  // ── Enrolled-students cache: subjectId → set of student identifiers ────
+  // Used to drop students that are NOT registered in the subject from a
+  // report (the website sometimes saves a report with non-enrolled names).
+  List<Map<String, dynamic>> _allSubjects = [];
+  final Map<int, Set<String>> _enrolledCache = {};
+
   @override
   void initState() {
     super.initState();
@@ -67,7 +78,13 @@ class _DoctorReportsState extends State<DoctorReports> {
     try {
       final auth = context.read<AuthCubit>().state;
       final token = auth.token;
-      final doctorId = auth.user?.effectiveDoctorId ?? 0;
+      // A TA's reports are saved under the TA's own id (same as the session
+      // owner id used by the attendance screen), while a doctor's reports use
+      // the doctor id — so load with the matching id.
+      final user = auth.user;
+      final doctorId = user == null
+          ? 0
+          : (user.isTeachingAssistant ? user.id : user.effectiveDoctorId);
       if (token == null) {
         setState(() {
           _error = 'Not authenticated';
@@ -88,10 +105,16 @@ class _DoctorReportsState extends State<DoctorReports> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final reports = (data is List)
-            ? data.cast<Map<String, dynamic>>()
+            ? data
+                .cast<Map<String, dynamic>>()
+                .map((r) => Map<String, dynamic>.from(r))
+                .toList()
             : <Map<String, dynamic>>[];
         reports.sort((a, b) => (b['createdAt'] ?? b['created_at'] ?? '')
             .compareTo(a['createdAt'] ?? a['created_at'] ?? ''));
+        // Keep only students actually registered in each report's subject —
+        // the website sometimes saves reports that list non-enrolled names.
+        await _filterReportsToEnrolled(reports, token);
         setState(() {
           _reports = reports;
           _isLoading = false;
@@ -113,6 +136,218 @@ class _DoctorReportsState extends State<DoctorReports> {
   Future<void> _refreshReports() async {
     await _loadReports();
   }
+
+  // ============================================
+  // Enrollment filter — keep only registered students in each report
+  // ============================================
+  Future<void> _filterReportsToEnrolled(
+      List<Map<String, dynamic>> reports, String token) async {
+    // Load the subjects list once so report subject names map to subject ids.
+    if (_allSubjects.isEmpty) {
+      try {
+        final res = await http.get(
+          Uri.parse('${AppConstants.baseUrl}/api/subjects'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token'
+          },
+        ).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) {
+          final d = jsonDecode(res.body);
+          if (d is List) _allSubjects = d.cast<Map<String, dynamic>>();
+        }
+      } catch (_) {}
+    }
+
+    for (final report in reports) {
+      final students =
+          (report['students'] as List?)?.cast<Map<String, dynamic>>();
+      if (students == null || students.isEmpty) continue;
+
+      final subjectId = _resolveSubjectId(report);
+      if (subjectId == null) continue;
+
+      final enrolled = await _enrolledIds(subjectId, token);
+      if (enrolled.isEmpty) continue; // can't verify → keep report as-is
+
+      final filtered =
+          students.where((s) => _isEnrolledStudent(s, enrolled)).toList();
+
+      // The enrollment list is authoritative — replace whenever the report
+      // carried students that are NOT registered in the subject. Matching is
+      // done on id, student code AND name, so a mismatch wiping a valid
+      // report is practically impossible.
+      if (filtered.length != students.length) {
+        final present =
+            filtered.where((s) => s['status'] == 'confirmed').length;
+        final pending = filtered.where((s) => s['status'] == 'pending').length;
+        final absent = filtered.length - present - pending;
+        report['students'] = filtered;
+        report['totalStudents'] = filtered.length;
+        report['total_students'] = filtered.length;
+        report['enrolled'] = filtered.length;
+        report['enrolled_count'] = filtered.length;
+        report['presentCount'] = present;
+        report['present_count'] = present;
+        report['present'] = present;
+        report['confirmed'] = present;
+        report['pendingCount'] = pending;
+        report['pending_count'] = pending;
+        report['pending'] = pending;
+        report['absentCount'] = absent;
+        report['absent_count'] = absent;
+        report['absent'] = absent;
+        report['rate'] = filtered.isEmpty
+            ? 0
+            : (present / filtered.length * 100).round();
+      }
+    }
+  }
+
+  String _normName(String s) =>
+      s.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  // A report student counts as enrolled if its id, student code OR name
+  // matches the subject's registered-students list.
+  bool _isEnrolledStudent(Map<String, dynamic> student, Set<String> enrolled) {
+    for (final key in const [
+      'student_id',
+      'studentId',
+      'student_id_number',
+      'studentIdNumber',
+      'id',
+      'studentDbId'
+    ]) {
+      final v = student[key];
+      if (v != null && enrolled.contains(v.toString())) return true;
+    }
+    final name = (student['student_name'] ??
+            student['studentName'] ??
+            student['name'] ??
+            '')
+        .toString();
+    if (name.trim().isNotEmpty &&
+        enrolled.contains('name:${_normName(name)}')) {
+      return true;
+    }
+    return false;
+  }
+
+  int? _resolveSubjectId(Map<String, dynamic> report) {
+    final raw = report['subjectId'] ?? report['subject_id'];
+    if (raw != null) {
+      final n = int.tryParse(raw.toString());
+      if (n != null) return n;
+    }
+    final name = (report['subjectName'] ?? report['subject_name'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (name.isEmpty) return null;
+    for (final s in _allSubjects) {
+      final sn = (s['name'] ?? '').toString().trim().toLowerCase();
+      if (sn == name) {
+        final id = s['id'];
+        return id is int ? id : int.tryParse(id.toString());
+      }
+    }
+    return null;
+  }
+
+  Future<Set<String>> _enrolledIds(int subjectId, String token) async {
+    if (_enrolledCache.containsKey(subjectId)) {
+      return _enrolledCache[subjectId]!;
+    }
+    final set = <String>{};
+    try {
+      final res = await http.get(
+        Uri.parse(
+            '${AppConstants.baseUrl}/api/subject/$subjectId/enrolled-students'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final list = (d['students'] as List?) ?? [];
+        for (final s in list) {
+          if (s is Map) {
+            if (s['id'] != null) set.add(s['id'].toString());
+            if (s['student_id'] != null) set.add(s['student_id'].toString());
+            final nm = (s['name'] ?? '').toString();
+            if (nm.trim().isNotEmpty) set.add('name:${_normName(nm)}');
+          }
+        }
+      }
+    } catch (_) {}
+    _enrolledCache[subjectId] = set;
+    return set;
+  }
+
+  // ============================================
+  // Filters
+  // ============================================
+  DateTime? _reportDate(Map<String, dynamic> r) {
+    final raw = (r['createdAt'] ??
+            r['created_at'] ??
+            r['date'] ??
+            r['startTimeIso'] ??
+            r['startTime'] ??
+            '')
+        .toString();
+    if (raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toLocal();
+  }
+
+  List<String> get _subjectOptions {
+    final set = <String>{};
+    for (final r in _reports) {
+      final n = (r['subjectName'] ?? r['subject_name'] ?? '').toString().trim();
+      if (n.isNotEmpty) set.add(n);
+    }
+    final list = set.toList()..sort();
+    return list;
+  }
+
+  List<int> get _levelOptions {
+    final set = <int>{};
+    for (final r in _reports) {
+      final lvl = r['level'];
+      final n = lvl is int ? lvl : int.tryParse(lvl?.toString() ?? '');
+      if (n != null) set.add(n);
+    }
+    final list = set.toList()..sort();
+    return list;
+  }
+
+  List<Map<String, dynamic>> get _filteredReports {
+    return _reports.where((r) {
+      if (_filterSubject != null) {
+        final n =
+            (r['subjectName'] ?? r['subject_name'] ?? '').toString().trim();
+        if (n != _filterSubject) return false;
+      }
+      if (_filterLevel != null) {
+        final lvl = r['level'];
+        final n = lvl is int ? lvl : int.tryParse(lvl?.toString() ?? '');
+        if (n != _filterLevel) return false;
+      }
+      if (_filterDate != null) {
+        final d = _reportDate(r);
+        if (d == null ||
+            d.year != _filterDate!.year ||
+            d.month != _filterDate!.month ||
+            d.day != _filterDate!.day) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  bool get _hasActiveFilter =>
+      _filterSubject != null || _filterLevel != null || _filterDate != null;
 
   // ============================================
   // DELETE REPORT
@@ -171,9 +406,10 @@ class _DoctorReportsState extends State<DoctorReports> {
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        // Remove from local list
+        // Remove by identity — the card index refers to the filtered list,
+        // not the master list.
         setState(() {
-          _reports.removeAt(index);
+          _reports.remove(report);
         });
         // ignore: use_build_context_synchronously
         ToastMessage.showSuccess(context, 'Report deleted successfully');
@@ -248,21 +484,207 @@ class _DoctorReportsState extends State<DoctorReports> {
                             fontSize: 13.sp, color: Colors.grey.shade400),
                         textAlign: TextAlign.center),
                   ])))
-            else
-              SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                (context, index) => Padding(
-                  padding:
-                      EdgeInsets.symmetric(horizontal: 16.w, vertical: 6.h),
-                  child: _buildReportCard(_reports[index], isDark, index),
-                ),
-                childCount: _reports.length,
-              )),
+            else ...[
+              SliverToBoxAdapter(child: _buildFilterBar(isDark)),
+              if (_filteredReports.isEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 60.h),
+                    child: Column(children: [
+                      Icon(Icons.search_off,
+                          size: 56.sp, color: Colors.grey.shade400),
+                      SizedBox(height: 12.h),
+                      Text('No reports match the filters',
+                          style: TextStyle(
+                              fontSize: 14.sp, color: Colors.grey.shade500)),
+                    ]),
+                  ),
+                )
+              else
+                SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                  (context, index) => Padding(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 16.w, vertical: 6.h),
+                    child:
+                        _buildReportCard(_filteredReports[index], isDark, index),
+                  ),
+                  childCount: _filteredReports.length,
+                )),
+            ],
             SliverToBoxAdapter(child: SizedBox(height: 100.h)),
           ],
         ),
       ),
     );
+  }
+
+  // ============================================
+  // Filter bar (search) — Subject • Level • Date
+  // ============================================
+  Widget _buildFilterBar(bool isDark) {
+    final subjects = _subjectOptions;
+    final levels = _levelOptions;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16.w, 4.h, 16.w, 8.h),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          _filterPill(
+            icon: Icons.menu_book_outlined,
+            label: _filterSubject ?? 'All Subjects',
+            active: _filterSubject != null,
+            isDark: isDark,
+            onTap: () => _pickFromList(
+              title: 'Subject',
+              options: ['All Subjects', ...subjects],
+              onSelected: (v) => setState(
+                  () => _filterSubject = v == 'All Subjects' ? null : v),
+            ),
+          ),
+          SizedBox(width: 8.w),
+          _filterPill(
+            icon: Icons.layers_outlined,
+            label: _filterLevel == null ? 'All Levels' : 'Level $_filterLevel',
+            active: _filterLevel != null,
+            isDark: isDark,
+            onTap: () => _pickFromList(
+              title: 'Level',
+              options: ['All Levels', ...levels.map((l) => 'Level $l')],
+              onSelected: (v) => setState(() => _filterLevel = v == 'All Levels'
+                  ? null
+                  : int.tryParse(v.replaceAll('Level ', ''))),
+            ),
+          ),
+          SizedBox(width: 8.w),
+          _filterPill(
+            icon: Icons.calendar_today,
+            label: _filterDate == null
+                ? 'Any Date'
+                : '${_filterDate!.day}/${_filterDate!.month}/${_filterDate!.year}',
+            active: _filterDate != null,
+            isDark: isDark,
+            onTap: _pickDate,
+          ),
+          if (_hasActiveFilter) ...[
+            SizedBox(width: 8.w),
+            _filterPill(
+              icon: Icons.close,
+              label: 'Clear',
+              active: true,
+              isDark: isDark,
+              onTap: () => setState(() {
+                _filterSubject = null;
+                _filterLevel = null;
+                _filterDate = null;
+              }),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _filterPill({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    final primary = Theme.of(context).primaryColor;
+    final bg = active
+        ? primary.withValues(alpha: 0.15)
+        : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.grey.shade100);
+    final fg = active
+        ? primary
+        : (isDark ? Colors.white70 : const Color(0xFF475569));
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 9.h),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12.r),
+          border: Border.all(
+              color: active
+                  ? primary.withValues(alpha: 0.4)
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.grey.shade300)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14.sp, color: fg),
+          SizedBox(width: 6.w),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12.sp, fontWeight: FontWeight.w600, color: fg)),
+          if (icon != Icons.close) ...[
+            SizedBox(width: 4.w),
+            Icon(Icons.keyboard_arrow_down, size: 15.sp, color: fg),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  void _pickFromList({
+    required String title,
+    required List<String> options,
+    required void Function(String) onSelected,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20.r))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+              margin: EdgeInsets.symmetric(vertical: 10.h),
+              width: 40.w,
+              height: 4.h,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade500,
+                  borderRadius: BorderRadius.circular(4.r))),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 4.h),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(title,
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15.sp)),
+            ),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: options
+                  .map((o) => ListTile(
+                        title: Text(o, style: TextStyle(fontSize: 13.sp)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          onSelected(o);
+                        },
+                      ))
+                  .toList(),
+            ),
+          ),
+          SizedBox(height: 8.h),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _filterDate ?? now,
+      firstDate: DateTime(now.year - 2),
+      lastDate: DateTime(now.year + 2),
+    );
+    if (picked != null) setState(() => _filterDate = picked);
   }
 
   Widget _buildReportCard(Map<String, dynamic> report, bool isDark, int index) {
@@ -286,13 +708,24 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['created_at'] ??
         '';
 
-    final dateField =
-        startTime.toString().isNotEmpty ? startTime : (report['date'] ?? '');
+    // DATE column: prefer a reliable full timestamp. `createdAt` is always a
+    // valid ISO string from the server (same day as the session), while
+    // `startTime` may be a bare time on website-made reports — which would
+    // make the date render as a time.
+    final dateField = (report['createdAt'] ??
+            report['created_at'] ??
+            report['date'] ??
+            (startTime.toString().isNotEmpty ? startTime : '') ??
+            '')
+        .toString();
     final students = report['students'] as List? ?? [];
-    final totalStudents =
-        report['totalStudents'] ?? report['total_students'] ?? students.length;
+    final totalStudents = report['totalStudents'] ??
+        report['total_students'] ??
+        report['enrolled'] ??
+        students.length;
     final presentCount = report['presentCount'] ??
         report['present_count'] ??
+        report['present'] ??
         students.where((s) => s['status'] == 'confirmed').length;
     final rate = totalStudents > 0 ? (presentCount / totalStudents * 100) : 0.0;
 
@@ -384,27 +817,9 @@ class _DoctorReportsState extends State<DoctorReports> {
         Padding(
           padding: EdgeInsets.fromLTRB(16.w, 0, 16.w, 16.h),
           child: Builder(builder: (ctx) {
-            final user = ctx.watch<AuthCubit>().state.user;
-            final canView =
-                user == null || user.hasTAPermission('ta.reports.view');
-            final canExport =
-                user == null || user.hasTAPermission('ta.reports.export');
-
-            if (!canView && !canExport) {
-              return Container(
-                padding: EdgeInsets.symmetric(vertical: 10.h),
-                alignment: Alignment.center,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.lock_outline, size: 14.sp, color: Colors.grey),
-                    SizedBox(width: 6.w),
-                    Text('Actions locked by professor',
-                        style: TextStyle(fontSize: 12.sp, color: Colors.grey)),
-                  ],
-                ),
-              );
-            }
+            // Reports are always available — including for teaching assistants.
+            const canView = true;
+            const canExport = true;
 
             return Row(
               children: [
@@ -599,8 +1014,15 @@ class _DoctorReportsState extends State<DoctorReports> {
       ));
 
   Widget _studentRow(Map<String, dynamic> student, bool isDark) {
-    final name = student['student_name'] ?? student['name'] ?? 'Unknown';
-    final sid = student['student_id_number'] ?? student['student_id'] ?? '';
+    final name = student['student_name'] ??
+        student['studentName'] ??
+        student['name'] ??
+        'Unknown';
+    final sid = student['student_id_number'] ??
+        student['studentIdNumber'] ??
+        student['studentId'] ??
+        student['student_id'] ??
+        '';
     final status = student['status'] ?? 'absent';
     final confirmedAt =
         student['confirmed_at'] ?? student['qr_scanned_at'] ?? '';
@@ -742,14 +1164,39 @@ class _DoctorReportsState extends State<DoctorReports> {
   // ============================================
   String _fmtTime12(String iso) {
     if (iso.isEmpty) return '';
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
-      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-      return '$h:${dt.minute.toString().padLeft(2, '0')} $ampm';
-    } catch (_) {
-      return iso;
-    }
+    final dt = _parseFlexibleTime(iso);
+    if (dt == null) return iso;
+    final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+    return '$h:${dt.minute.toString().padLeft(2, '0')} $ampm';
+  }
+
+  /// Parses either a full ISO datetime OR a bare time string
+  /// (e.g. "20:16:11" or "8:13:42 PM"). Returns null if neither matches.
+  /// Bare times are anchored to a fixed reference date so two of them
+  /// can still be compared.
+  DateTime? _parseFlexibleTime(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+
+    // Full ISO datetime
+    final iso = DateTime.tryParse(s);
+    if (iso != null) return iso.toLocal();
+
+    // Bare time: "HH:mm[:ss]" optionally with AM/PM
+    final m = RegExp(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?$')
+        .firstMatch(s);
+    if (m == null) return null;
+
+    var hour = int.parse(m.group(1)!);
+    final minute = int.parse(m.group(2)!);
+    final second = int.parse(m.group(3) ?? '0');
+    final ampm = m.group(4)?.toUpperCase();
+    if (ampm == 'PM' && hour < 12) hour += 12;
+    if (ampm == 'AM' && hour == 12) hour = 0;
+    if (hour > 23 || minute > 59 || second > 59) return null;
+
+    return DateTime(2000, 1, 1, hour, minute, second);
   }
 
   String _fmtDate(String iso) {
@@ -791,32 +1238,21 @@ class _DoctorReportsState extends State<DoctorReports> {
   /// Calculate and format the duration between start and end times
   /// Returns a human-readable duration string (e.g., "2h 30m" or "45m")
   String _calculateDuration(String startIso, String endIso) {
-    if (startIso.isEmpty || endIso.isEmpty) {
-      return '';
-    }
+    final start = _parseFlexibleTime(startIso);
+    final end = _parseFlexibleTime(endIso);
+    if (start == null || end == null) return '';
 
-    try {
-      final startTime = DateTime.parse(startIso).toLocal();
-      final endTime = DateTime.parse(endIso).toLocal();
+    // Compare time-of-day only, so it works whether the values are full
+    // ISO datetimes or bare time strings (and ignores any date mismatch).
+    DateTime tod(DateTime d) =>
+        DateTime(2000, 1, 1, d.hour, d.minute, d.second);
+    var duration = tod(end).difference(tod(start));
 
-      // Ensure end time is after start time
-      if (endTime.isBefore(startTime)) {
-        print('⚠️ Warning: End time is before start time');
-        return 'Error';
-      }
+    // If the session appears to cross midnight, roll the end to next day.
+    if (duration.isNegative) duration += const Duration(days: 1);
 
-      final duration = endTime.difference(startTime);
-      final hours = duration.inHours;
-      final minutes = duration.inMinutes.remainder(60);
-
-      if (hours > 0) {
-        return '${hours}h ${minutes}m';
-      } else {
-        return '${minutes}m';
-      }
-    } catch (e) {
-      print('❌ Error calculating duration: $e');
-      return '';
-    }
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    return hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
   }
 }
