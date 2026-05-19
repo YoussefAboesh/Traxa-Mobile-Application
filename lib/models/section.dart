@@ -1,14 +1,9 @@
-// lib/models/section.dart
-//
-// السكاشن بتيجي من الـ sections endpoint —
-// الـ backend بيرجع البيانات في صيغة JSON
-
 class Section {
   final int id;
   final int subjectId;
   final String subjectName;
   final int? taId;
-  String taName;  // can be updated after fetching from API
+  String taName;
   final String day;
   final String startTime;
   final String endTime;
@@ -16,7 +11,7 @@ class Section {
   final int level;
   final String? department;
   final String? rawTimeDisplay;
-  final int? semester;  // ✅ Changed to nullable int
+  final int? semester;
 
   Section({
     required this.id,
@@ -31,33 +26,28 @@ class Section {
     required this.level,
     this.department,
     this.rawTimeDisplay,
-    this.semester,  // ✅ not required, can be null
+    this.semester,
   });
 
   String get timeDisplay {
-    // Use raw time display if available from API
     if (rawTimeDisplay != null && rawTimeDisplay!.isNotEmpty) {
       return rawTimeDisplay!;
     }
-    
-    // Otherwise build from start/end times
+
     if (endTime.isEmpty) {
       return startTime;
     }
-    
+
     return '$startTime - $endTime';
   }
 
-  /// بنبني Section من الـ raw JSON اللي بييجي من الـ sections endpoint
   factory Section.fromJson(Map<String, dynamic> json) {
-    // محاولة جلب وقت العرض المباشر أولاً (nullable)
     final rawTimeDisplay = json['time_display']?.toString() ??
                            json['timeDisplay']?.toString() ??
                            json['time']?.toString();
 
-    // محاولة جلب اسم المعيد من عدة مصادر
     String taName = '';
-    
+
     final possibleTaNameKeys = [
       'ta_name',
       'taName',
@@ -72,7 +62,7 @@ class Section {
       'teacher_name',
       'teacherName'
     ];
-    
+
     for (final key in possibleTaNameKeys) {
       if (json[key] != null && json[key].toString().isNotEmpty) {
         taName = json[key].toString();
@@ -80,7 +70,6 @@ class Section {
       }
     }
 
-    // محاولة جلب الـ ta_id من عدة مصادر
     int? taId;
     final possibleTaIdKeys = ['ta_id', 'taId', 'teaching_assistant_id', 'teachingAssistantId'];
     for (final key in possibleTaIdKeys) {
@@ -94,26 +83,25 @@ class Section {
       }
     }
 
-    // محاولة جلب وقت البداية والنهاية
     String startTime = '';
     String endTime = '';
-    
+
     final possibleStartTimeKeys = [
-      'start_time', 'startTime', 'time_start', 'timeStart', 
+      'start_time', 'startTime', 'time_start', 'timeStart',
       'from', 'start'
     ];
     final possibleEndTimeKeys = [
-      'end_time', 'endTime', 'time_end', 'timeEnd', 
+      'end_time', 'endTime', 'time_end', 'timeEnd',
       'to', 'end'
     ];
-    
+
     for (final key in possibleStartTimeKeys) {
       if (json[key] != null && json[key].toString().isNotEmpty) {
         startTime = json[key].toString();
         break;
       }
     }
-    
+
     for (final key in possibleEndTimeKeys) {
       if (json[key] != null && json[key].toString().isNotEmpty) {
         endTime = json[key].toString();
@@ -121,42 +109,39 @@ class Section {
       }
     }
 
-    // جلب اسم المكان
     String locationName = '';
     final possibleLocationKeys = [
-      'location_name', 'locationName', 'hall', 'room', 'location', 
+      'location_name', 'locationName', 'hall', 'room', 'location',
       'place', 'venue', 'classroom', 'building'
     ];
-    
+
     for (final key in possibleLocationKeys) {
       if (json[key] != null && json[key].toString().isNotEmpty) {
         locationName = json[key].toString();
         break;
       }
     }
-    
+
     if (locationName.isEmpty) {
       locationName = 'Location TBA';
     }
 
-    // جلب اسم المادة
     String subjectName = '';
     final possibleSubjectKeys = [
       'subject_name', 'subjectName', 'name', 'title', 'course_name', 'courseName'
     ];
-    
+
     for (final key in possibleSubjectKeys) {
       if (json[key] != null && json[key].toString().isNotEmpty) {
         subjectName = json[key].toString();
         break;
       }
     }
-    
+
     if (subjectName.isEmpty) {
       subjectName = 'Unknown Subject';
     }
 
-    // ✅ جلب الـ semester (مع handling للـ null)
     int? semester;
     final semesterValue = json['semester'] ?? json['subject_semester'];
     if (semesterValue is int) {
@@ -178,7 +163,7 @@ class Section {
       level: json['level'] ?? 1,
       department: json['department']?.toString(),
       rawTimeDisplay: rawTimeDisplay,
-      semester: semester,  // ✅ can be null
+      semester: semester,
     );
   }
 
@@ -198,7 +183,6 @@ class Section {
         'semester': semester,
       };
 
-  /// هل الـ JSON row ده section؟
   static bool isSection(Map<String, dynamic> json) {
     final type = (json['type'] ??
             json['lecture_type'] ??

@@ -1,5 +1,3 @@
-// lib/services/websocket_service.dart
-// ✅ FIX: Improved reconnection and stream handling + Academic Year Support
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -9,6 +7,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants.dart';
 import 'secure_storage_service.dart';
+import '../core/logger.dart';
 
 class WebSocketService {
   static WebSocketService? _instance;
@@ -21,7 +20,6 @@ class WebSocketService {
   int _reconnectAttempts = 0;
   static const int maxReconnectAttempts = 10;
 
-  // ✅ Streams are re-initialized on connect, but listeners stay attached
   StreamController<Map<String, dynamic>>? _dataChangeController;
   StreamController<int>? _semesterController;
   StreamController<String>? _academicYearController;
@@ -33,63 +31,62 @@ class WebSocketService {
   StreamController<Map<String, dynamic>>? _levelsPromotedController;
   StreamController<Map<String, dynamic>>? _taPermissionsController;
 
-  // Public getters for streams - ensures listeners never get closed streams
   Stream<Map<String, dynamic>> get dataChangeStream {
     if (_dataChangeController == null || _dataChangeController!.isClosed) {
       _initStreams();
     }
     return _dataChangeController!.stream;
   }
-  
+
   Stream<int> get semesterStream {
     if (_semesterController == null || _semesterController!.isClosed) {
       _initStreams();
     }
     return _semesterController!.stream;
   }
-  
+
   Stream<String> get academicYearStream {
     if (_academicYearController == null || _academicYearController!.isClosed) {
       _initStreams();
     }
     return _academicYearController!.stream;
   }
-  
+
   Stream<Map<String, dynamic>> get gradeUpdateStream {
     if (_gradeUpdateController == null || _gradeUpdateController!.isClosed) {
       _initStreams();
     }
     return _gradeUpdateController!.stream;
   }
-  
+
   Stream<Map<String, dynamic>> get sessionActivatedStream {
     if (_sessionActivatedController == null || _sessionActivatedController!.isClosed) {
       _initStreams();
     }
     return _sessionActivatedController!.stream;
   }
-  
+
   Stream<Map<String, dynamic>> get sessionEndedStream {
     if (_sessionEndedController == null || _sessionEndedController!.isClosed) {
       _initStreams();
     }
     return _sessionEndedController!.stream;
   }
-  
+
   Stream<Map<String, dynamic>> get reportSavedStream {
     if (_reportSavedController == null || _reportSavedController!.isClosed) {
       _initStreams();
     }
     return _reportSavedController!.stream;
   }
-  
+
   Stream<List<dynamic>> get registrationApprovedStream {
     if (_registrationApprovedController == null || _registrationApprovedController!.isClosed) {
       _initStreams();
     }
     return _registrationApprovedController!.stream;
   }
-  
+
   Stream<Map<String, dynamic>> get levelsPromotedStream {
     if (_levelsPromotedController == null || _levelsPromotedController!.isClosed) {
       _initStreams();
@@ -109,12 +106,10 @@ class WebSocketService {
   }
 
   void _initStreams() {
-    // Don't close existing streams if they are still alive
     if (_dataChangeController != null && !_dataChangeController!.isClosed) {
       return;
     }
-    
-    // Create new streams
+
     _dataChangeController = StreamController<Map<String, dynamic>>.broadcast();
     _semesterController = StreamController<int>.broadcast();
     _academicYearController = StreamController<String>.broadcast();
@@ -126,31 +121,24 @@ class WebSocketService {
     _levelsPromotedController = StreamController<Map<String, dynamic>>.broadcast();
     _taPermissionsController = StreamController<Map<String, dynamic>>.broadcast();
 
-    print('✅ WebSocket streams initialized');
+    logDebug('✅ WebSocket streams initialized');
   }
 
-
   Future<void> connect() async {
-    // If already connected, don't reconnect
     if (_isConnected && _channel != null) {
-      print('⚠️ WebSocket already connected');
+      logDebug('⚠️ WebSocket already connected');
       return;
     }
 
-    // Ensure streams are ready before connection
     if (_dataChangeController == null || _dataChangeController!.isClosed) {
       _initStreams();
     }
 
-    // ✅ FIX: the auth token & user data live in encrypted SecureStorage —
-    // NOT in SharedPreferences. Reading them from SharedPreferences always
-    // returned null, so connect() bailed out and the socket never came up
-    // (the "online" dot stayed red even though the server was reachable).
     final token = await SecureStorageService.getToken();
     final userData = await SecureStorageService.getUserData();
 
     if (token == null || token.isEmpty || userData == null) {
-      print('⚠️ No token or user data, skipping WebSocket connection');
+      logDebug('⚠️ No token or user data, skipping WebSocket connection');
       return;
     }
 
@@ -169,10 +157,6 @@ class WebSocketService {
     final wsUrl = '${AppConstants.wsUrl}?type=mobile';
 
     try {
-      // The server runs on the local network with a self-signed
-      // certificate. Connect through an HttpClient that explicitly trusts
-      // that one host so the wss:// TLS handshake succeeds — relying on the
-      // global HttpOverrides alone is not reliable for IOWebSocketChannel.
       final trustedHost = Uri.parse(AppConstants.baseUrl).host;
       final httpClient = HttpClient()
         ..badCertificateCallback =
@@ -180,9 +164,6 @@ class WebSocketService {
                 host == trustedHost)
         ..connectionTimeout = const Duration(seconds: 10);
 
-      // Awaiting WebSocket.connect means _isConnected only flips to true
-      // once the handshake has actually completed — so the online dot is
-      // accurate instead of optimistically green/red.
       final socket = await WebSocket.connect(wsUrl, customClient: httpClient)
           .timeout(const Duration(seconds: 12));
 
@@ -196,12 +177,12 @@ class WebSocketService {
           _reconnectAttempts = 0;
         },
         onDone: () {
-          print('📡 WebSocket disconnected');
+          logDebug('📡 WebSocket disconnected');
           _isConnected = false;
           _scheduleReconnect();
         },
         onError: (error) {
-          print('❌ WebSocket error: $error');
+          logDebug('❌ WebSocket error: $error');
           _isConnected = false;
           _scheduleReconnect();
         },
@@ -217,9 +198,9 @@ class WebSocketService {
       });
 
       _startHeartbeat();
-      print('✅ WebSocket connected and registered');
+      logDebug('✅ WebSocket connected and registered');
     } catch (e) {
-      print('❌ WebSocket connection failed: $e');
+      logDebug('❌ WebSocket connection failed: $e');
       _isConnected = false;
       _channel = null;
       _scheduleReconnect();
@@ -229,19 +210,18 @@ class WebSocketService {
   void _handleMessage(dynamic message) {
     try {
       final data = jsonDecode(message);
-      print('📨 WebSocket received: ${data['type']}');
+      logDebug('📨 WebSocket received: ${data['type']}');
 
-      // Add to main data change stream for general listeners
       if (_dataChangeController != null && !_dataChangeController!.isClosed) {
         _dataChangeController?.add(data);
       }
 
       switch (data['type']) {
         case 'CONNECTION_ESTABLISHED':
-          print('✅ Connected with ID: ${data['clientId']}');
+          logDebug('✅ Connected with ID: ${data['clientId']}');
           break;
         case 'REGISTERED':
-          print('✅ Registered to WebSocket server');
+          logDebug('✅ Registered to WebSocket server');
           break;
         case 'PING':
           sendMessage({'type': 'PONG', 'timestamp': DateTime.now().millisecondsSinceEpoch});
@@ -254,7 +234,7 @@ class WebSocketService {
         case 'SEMESTER_CHANGED':
           final semester = data['value'] ?? data['semester'];
           if (semester != null) {
-            print('📢 Semester changed to: $semester');
+            logDebug('📢 Semester changed to: $semester');
             if (_semesterController != null && !_semesterController!.isClosed) {
               _semesterController?.add(semester as int);
             }
@@ -269,7 +249,7 @@ class WebSocketService {
                 data['newYear'] ??
                 data['current_academic_year'];
             if (year != null) {
-              print('📢 Academic year changed to: $year');
+              logDebug('📢 Academic year changed to: $year');
               _persistAcademicYear(year.toString());
               if (_academicYearController != null && !_academicYearController!.isClosed) {
                 _academicYearController?.add(year.toString());
@@ -278,25 +258,25 @@ class WebSocketService {
           }
           break;
         case 'SESSION_ACTIVATED':
-          print('📢 Session activated: ${data['session']?['subjectName']}');
+          logDebug('📢 Session activated: ${data['session']?['subjectName']}');
           if (_sessionActivatedController != null && !_sessionActivatedController!.isClosed) {
             _sessionActivatedController?.add(data);
           }
           break;
         case 'SESSION_ENDED':
-          print('📢 Session ended: ${data['sessionId']}');
+          logDebug('📢 Session ended: ${data['sessionId']}');
           if (_sessionEndedController != null && !_sessionEndedController!.isClosed) {
             _sessionEndedController?.add(data);
           }
           break;
         case 'REPORT_SAVED':
-          print('📢 Report saved for session: ${data['report']?['sessionId']}');
+          logDebug('📢 Report saved for session: ${data['report']?['sessionId']}');
           if (_reportSavedController != null && !_reportSavedController!.isClosed) {
             _reportSavedController?.add(data);
           }
           break;
         case 'GRADE_UPDATED':
-          print('📢 Grade updated: ${data['subjectId']}');
+          logDebug('📢 Grade updated: ${data['subjectId']}');
           if (_gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
             _gradeUpdateController?.add(data);
           }
@@ -304,47 +284,46 @@ class WebSocketService {
         case 'REGISTRATION_APPROVED':
           final subjects = data['approvedSubjects'] as List?;
           if (subjects != null) {
-            print('📢 Registration approved for ${subjects.length} subjects');
+            logDebug('📢 Registration approved for ${subjects.length} subjects');
             if (_registrationApprovedController != null && !_registrationApprovedController!.isClosed) {
               _registrationApprovedController?.add(subjects);
             }
           }
           break;
         case 'LEVELS_PROMOTED':
-          print('📢 Levels promoted');
+          logDebug('📢 Levels promoted');
           if (_levelsPromotedController != null && !_levelsPromotedController!.isClosed) {
             _levelsPromotedController?.add(data);
           }
           break;
         case 'FULL_SYNC':
-          print('📢 Full sync requested');
+          logDebug('📢 Full sync requested');
           if (_dataChangeController != null && !_dataChangeController!.isClosed) {
             _dataChangeController?.add(data);
           }
           break;
         case 'TOKEN_EXPIRED':
-          print('⚠️ Token expired - need to logout');
+          logDebug('⚠️ Token expired - need to logout');
           if (_dataChangeController != null && !_dataChangeController!.isClosed) {
             _dataChangeController?.add({'type': 'TOKEN_EXPIRED'});
           }
           break;
         default:
-          print('📢 Unknown message type: ${data['type']}');
+          logDebug('📢 Unknown message type: ${data['type']}');
       }
     } catch (e) {
-      print('❌ Error parsing WebSocket message: $e');
+      logDebug('❌ Error parsing WebSocket message: $e');
     }
   }
 
   void _handleDataChange(Map<String, dynamic> data) {
     final entity = data['entity'] as String?;
     final action = data['action'] as String?;
-    print('🔄 Data change: $entity / $action');
+    logDebug('🔄 Data change: $entity / $action');
 
     switch (entity) {
       case 'grade':
         {
-          // handle any grade change: created, updated, hidden, shown, etc.
           final gradeData = data['data'] as Map<String, dynamic>?;
           if (gradeData != null && _gradeUpdateController != null && !_gradeUpdateController!.isClosed) {
             _gradeUpdateController?.add(gradeData);
@@ -367,7 +346,6 @@ class WebSocketService {
             _levelsPromotedController?.add(data);
           }
         } else {
-          // any other academic action → try to extract academic year
           final yearData = data['data'] as Map<String, dynamic>?;
           final newYear = yearData?['newYear'] ??
               yearData?['academicYear'] ??
@@ -375,7 +353,7 @@ class WebSocketService {
               yearData?['year'] ??
               yearData?['current_academic_year'];
           if (newYear != null && _academicYearController != null && !_academicYearController!.isClosed) {
-            print('📢 Academic year changed via DATA_CHANGE ($action): $newYear');
+            logDebug('📢 Academic year changed via DATA_CHANGE ($action): $newYear');
             _persistAcademicYear(newYear.toString());
             _academicYearController?.add(newYear.toString());
           }
@@ -408,7 +386,7 @@ class WebSocketService {
           if (systemData != null) {
             final semester = systemData['semester'] as int?;
             if (semester != null && _semesterController != null && !_semesterController!.isClosed) {
-              print('📢 System: semester changed to S$semester');
+              logDebug('📢 System: semester changed to S$semester');
               _semesterController?.add(semester);
             }
             final academicYear = systemData['academicYear'] ??
@@ -417,7 +395,7 @@ class WebSocketService {
                 systemData['current_academic_year'] ??
                 systemData['newYear'];
             if (academicYear != null && _academicYearController != null && !_academicYearController!.isClosed) {
-              print('📢 System: academic year changed to $academicYear');
+              logDebug('📢 System: academic year changed to $academicYear');
               _persistAcademicYear(academicYear.toString());
               _academicYearController?.add(academicYear.toString());
             }
@@ -449,16 +427,16 @@ class WebSocketService {
   void _persistAcademicYear(String year) {
     SharedPreferences.getInstance().then((prefs) {
       prefs.setString('system_academic_year', year);
-      print('💾 Academic year persisted via WS: $year');
+      logDebug('💾 Academic year persisted via WS: $year');
     });
   }
 
   void sendMessage(Map<String, dynamic> message) {
     if (_channel != null && _isConnected) {
       _channel!.sink.add(jsonEncode(message));
-      print('📤 WebSocket sent: ${message['type']}');
+      logDebug('📤 WebSocket sent: ${message['type']}');
     } else {
-      print('⚠️ Cannot send message, WebSocket not connected');
+      logDebug('⚠️ Cannot send message, WebSocket not connected');
     }
   }
 
@@ -474,38 +452,33 @@ class WebSocketService {
   void _scheduleReconnect() {
     if (_isConnected) return;
     _reconnectTimer?.cancel();
-    // Exponential-ish backoff capped at 30s. We never permanently give up —
-    // otherwise the app would stay "offline" forever after a transient drop
-    // even once the server is reachable again.
     final delay = Duration(
         seconds: min(5 * (min(_reconnectAttempts, maxReconnectAttempts) + 1), 30));
     _reconnectTimer = Timer(delay, () {
       _reconnectAttempts++;
-      print('🔄 Reconnecting WebSocket (attempt $_reconnectAttempts)...');
+      logDebug('🔄 Reconnecting WebSocket (attempt $_reconnectAttempts)...');
       connect();
     });
   }
 
   void disconnect() {
-    print('🔌 Disconnecting WebSocket manually');
+    logDebug('🔌 Disconnecting WebSocket manually');
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
-    
+
     if (_channel != null) {
       try {
         _channel!.sink.close();
       } catch (e) {
-        print('Error closing channel: $e');
+        logDebug('Error closing channel: $e');
       }
       _channel = null;
     }
-    
+
     _isConnected = false;
     _reconnectAttempts = 0;
-    
-    // ✅ Don't close streams on disconnect - they will be reused on reconnect
-    // This prevents listeners from being lost
-    print('🔌 WebSocket disconnected manually, streams kept alive');
+
+    logDebug('🔌 WebSocket disconnected manually, streams kept alive');
   }
 
   bool get isConnected => _isConnected;

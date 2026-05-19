@@ -1,5 +1,3 @@
-// lib/screens/sections/doctor/doctor_reports.dart
-// ✅ Fixes: 12-hour time + local timezone + working PDF download + RefreshIndicator + Delete Reports
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -29,9 +27,9 @@ class _DoctorReportsState extends State<DoctorReports> {
   StreamSubscription? _sessionEndedSub;
 
   // ── Filters (search bar like the website) ──────────────────────────────
-  String? _filterSubject; // null = All Subjects
-  int? _filterLevel; // null = All Levels
-  DateTime? _filterDate; // null = any date
+  String? _filterSubject;
+  int? _filterLevel;
+  DateTime? _filterDate;
 
   // ── Enrolled-students cache: subjectId → set of student identifiers ────
   // Used to drop students that are NOT registered in the subject from a
@@ -71,6 +69,7 @@ class _DoctorReportsState extends State<DoctorReports> {
   }
 
   Future<void> _loadReports() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -78,14 +77,12 @@ class _DoctorReportsState extends State<DoctorReports> {
     try {
       final auth = context.read<AuthCubit>().state;
       final token = auth.token;
-      // A TA's reports are saved under the TA's own id (same as the session
-      // owner id used by the attendance screen), while a doctor's reports use
-      // the doctor id — so load with the matching id.
       final user = auth.user;
       final doctorId = user == null
           ? 0
           : (user.isTeachingAssistant ? user.id : user.effectiveDoctorId);
       if (token == null) {
+        if (!mounted) return;
         setState(() {
           _error = 'Not authenticated';
           _isLoading = false;
@@ -112,20 +109,21 @@ class _DoctorReportsState extends State<DoctorReports> {
             : <Map<String, dynamic>>[];
         reports.sort((a, b) => (b['createdAt'] ?? b['created_at'] ?? '')
             .compareTo(a['createdAt'] ?? a['created_at'] ?? ''));
-        // Keep only students actually registered in each report's subject —
-        // the website sometimes saves reports that list non-enrolled names.
         await _filterReportsToEnrolled(reports, token);
+        if (!mounted) return;
         setState(() {
           _reports = reports;
           _isLoading = false;
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _error = 'Failed to load reports';
           _isLoading = false;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Connection error';
         _isLoading = false;
@@ -142,7 +140,6 @@ class _DoctorReportsState extends State<DoctorReports> {
   // ============================================
   Future<void> _filterReportsToEnrolled(
       List<Map<String, dynamic>> reports, String token) async {
-    // Load the subjects list once so report subject names map to subject ids.
     if (_allSubjects.isEmpty) {
       try {
         final res = await http.get(
@@ -168,15 +165,11 @@ class _DoctorReportsState extends State<DoctorReports> {
       if (subjectId == null) continue;
 
       final enrolled = await _enrolledIds(subjectId, token);
-      if (enrolled.isEmpty) continue; // can't verify → keep report as-is
+      if (enrolled.isEmpty) continue;
 
       final filtered =
           students.where((s) => _isEnrolledStudent(s, enrolled)).toList();
 
-      // The enrollment list is authoritative — replace whenever the report
-      // carried students that are NOT registered in the subject. Matching is
-      // done on id, student code AND name, so a mismatch wiping a valid
-      // report is practically impossible.
       if (filtered.length != students.length) {
         final present =
             filtered.where((s) => s['status'] == 'confirmed').length;
@@ -207,8 +200,6 @@ class _DoctorReportsState extends State<DoctorReports> {
   String _normName(String s) =>
       s.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
-  // A report student counts as enrolled if its id, student code OR name
-  // matches the subject's registered-students list.
   bool _isEnrolledStudent(Map<String, dynamic> student, Set<String> enrolled) {
     for (final key in const [
       'student_id',
@@ -353,7 +344,6 @@ class _DoctorReportsState extends State<DoctorReports> {
   // DELETE REPORT
   // ============================================
   Future<void> _deleteReport(Map<String, dynamic> report, int index) async {
-    // Confirm deletion
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -375,7 +365,7 @@ class _DoctorReportsState extends State<DoctorReports> {
       ),
     );
 
-    if (shouldDelete != true) return;
+    if (shouldDelete != true || !mounted) return;
 
     setState(() => _isDeleting = true);
 
@@ -406,11 +396,11 @@ class _DoctorReportsState extends State<DoctorReports> {
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        // Remove by identity — the card index refers to the filtered list,
-        // not the master list.
-        setState(() {
-          _reports.remove(report);
-        });
+        if (mounted) {
+          setState(() {
+            _reports.remove(report);
+          });
+        }
         // ignore: use_build_context_synchronously
         ToastMessage.showSuccess(context, 'Report deleted successfully');
       } else {
@@ -447,8 +437,7 @@ class _DoctorReportsState extends State<DoctorReports> {
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             ),
             if (_isLoading)
-              const SliverFillRemaining(
-                  hasScrollBody: true, child: SkeletonCardList())
+              SliverToBoxAdapter(child: _buildReportsSkeleton())
             else if (_error != null)
               SliverFillRemaining(
                   child: Center(
@@ -516,6 +505,108 @@ class _DoctorReportsState extends State<DoctorReports> {
           ],
         ),
       ),
+    );
+  }
+
+  // ============================================
+  // Loading skeleton — mirrors the real report card layout
+  // ============================================
+  Widget _buildReportsSkeleton() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AppSkeleton(
+      enabled: true,
+      child: ListView.builder(
+        padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+        physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        itemCount: 5,
+        itemBuilder: (_, __) => Padding(
+          padding: EdgeInsets.symmetric(vertical: 6.h),
+          child: _skeletonReportCard(isDark),
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonBox(double w, double h) => Container(
+        width: w,
+        height: h,
+        decoration: BoxDecoration(
+          color: Colors.grey,
+          borderRadius: BorderRadius.circular(6.r),
+        ),
+      );
+
+  Widget _skeletonReportCard(bool isDark) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20.r),
+        border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.1)
+                : Colors.grey.shade200),
+      ),
+      child: Column(children: [
+        // Header: subject name + code, rate badge
+        Padding(
+          padding: EdgeInsets.all(16.r),
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _skeletonBox(150.w, 15.h),
+                  SizedBox(height: 7.h),
+                  _skeletonBox(80.w, 11.h),
+                ],
+              ),
+            ),
+            Container(
+              width: 54.w,
+              height: 46.h,
+              decoration: BoxDecoration(
+                color: Colors.grey,
+                borderRadius: BorderRadius.circular(14.r),
+              ),
+            ),
+          ]),
+        ),
+        // Mini stats row (Date • Start • Duration • Present)
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.w),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(
+              4,
+              (_) => Column(children: [
+                Container(
+                  width: 22.w,
+                  height: 22.w,
+                  decoration: const BoxDecoration(
+                    color: Colors.grey,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                SizedBox(height: 6.h),
+                _skeletonBox(38.w, 10.h),
+                SizedBox(height: 4.h),
+                _skeletonBox(28.w, 8.h),
+              ]),
+            ),
+          ),
+        ),
+        SizedBox(height: 14.h),
+        // Action buttons (View Details • PDF)
+        Padding(
+          padding: EdgeInsets.fromLTRB(16.w, 0, 16.w, 16.h),
+          child: Row(children: [
+            Expanded(child: _skeletonBox(double.infinity, 42.h)),
+            SizedBox(width: 12.w),
+            _skeletonBox(72.w, 42.h),
+          ]),
+        ),
+      ]),
     );
   }
 
@@ -691,11 +782,6 @@ class _DoctorReportsState extends State<DoctorReports> {
     final subjectName =
         report['subjectName'] ?? report['subject_name'] ?? 'Unknown';
     final subjectCode = report['subjectCode'] ?? report['subject_code'] ?? '';
-    // 🕒 Always read the real session boundaries:
-    //   start = startTime/start_time (when activate was hit)
-    //   end   = endTime/end_time/endedAt (when end-session was hit)
-    // ⚠️ IMPORTANT: createdAt/created_at is the *report save* timestamp on the server
-    // and MUST NOT be used as end time — this was causing 1-hour delay issues.
     final startTime = report['startTime'] ??
         report['start_time'] ??
         report['startedAt'] ??
@@ -708,10 +794,6 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['created_at'] ??
         '';
 
-    // DATE column: prefer a reliable full timestamp. `createdAt` is always a
-    // valid ISO string from the server (same day as the session), while
-    // `startTime` may be a bare time on website-made reports — which would
-    // make the date render as a time.
     final dateField = (report['createdAt'] ??
             report['created_at'] ??
             report['date'] ??
@@ -776,7 +858,6 @@ class _DoctorReportsState extends State<DoctorReports> {
                         style: TextStyle(
                             fontSize: 12.sp, color: Theme.of(context).hintColor)),
                 ])),
-            // ✅ Delete button
             IconButton(
               onPressed:
                   _isDeleting ? null : () => _deleteReport(report, index),
@@ -817,7 +898,6 @@ class _DoctorReportsState extends State<DoctorReports> {
         Padding(
           padding: EdgeInsets.fromLTRB(16.w, 0, 16.w, 16.h),
           child: Builder(builder: (ctx) {
-            // Reports are always available — including for teaching assistants.
             const canView = true;
             const canExport = true;
 
@@ -842,7 +922,6 @@ class _DoctorReportsState extends State<DoctorReports> {
                   ),
                 if (canView && canExport) SizedBox(width: 12.w),
                 if (canExport)
-                  // ✅ Download PDF button
                   OutlinedButton.icon(
                     onPressed: () => _downloadPdf(report),
                     icon: Icon(Icons.picture_as_pdf, size: 18.sp),
@@ -885,8 +964,6 @@ class _DoctorReportsState extends State<DoctorReports> {
         report['subjectName'] ?? report['subject_name'] ?? 'Unknown';
     final students =
         (report['students'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    // Match the website: prefer startTime/endTime; createdAt is the
-    // report-saved timestamp and must not be shown as the start.
     final startTime = (report['startTime'] ??
             report['start_time'] ??
             report['startedAt'] ??
@@ -1114,7 +1191,6 @@ class _DoctorReportsState extends State<DoctorReports> {
   // PDF Download
   // ============================================
   Future<void> _downloadPdf(Map<String, dynamic> report) async {
-    // Show loading
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(children: [
@@ -1131,7 +1207,6 @@ class _DoctorReportsState extends State<DoctorReports> {
       ),
     );
 
-    // Fetch full report data if students list is empty
     Map<String, dynamic> fullReport = Map.from(report);
     if ((fullReport['students'] as List?)?.isEmpty ?? true) {
       final auth = context.read<AuthCubit>().state;
@@ -1171,19 +1246,13 @@ class _DoctorReportsState extends State<DoctorReports> {
     return '$h:${dt.minute.toString().padLeft(2, '0')} $ampm';
   }
 
-  /// Parses either a full ISO datetime OR a bare time string
-  /// (e.g. "20:16:11" or "8:13:42 PM"). Returns null if neither matches.
-  /// Bare times are anchored to a fixed reference date so two of them
-  /// can still be compared.
   DateTime? _parseFlexibleTime(String raw) {
     final s = raw.trim();
     if (s.isEmpty) return null;
 
-    // Full ISO datetime
     final iso = DateTime.tryParse(s);
     if (iso != null) return iso.toLocal();
 
-    // Bare time: "HH:mm[:ss]" optionally with AM/PM
     final m = RegExp(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?$')
         .firstMatch(s);
     if (m == null) return null;
@@ -1235,20 +1304,15 @@ class _DoctorReportsState extends State<DoctorReports> {
     }
   }
 
-  /// Calculate and format the duration between start and end times
-  /// Returns a human-readable duration string (e.g., "2h 30m" or "45m")
   String _calculateDuration(String startIso, String endIso) {
     final start = _parseFlexibleTime(startIso);
     final end = _parseFlexibleTime(endIso);
     if (start == null || end == null) return '';
 
-    // Compare time-of-day only, so it works whether the values are full
-    // ISO datetimes or bare time strings (and ignores any date mismatch).
     DateTime tod(DateTime d) =>
         DateTime(2000, 1, 1, d.hour, d.minute, d.second);
     var duration = tod(end).difference(tod(start));
 
-    // If the session appears to cross midnight, roll the end to next day.
     if (duration.isNegative) duration += const Duration(days: 1);
 
     final hours = duration.inHours;

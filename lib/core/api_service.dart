@@ -1,4 +1,3 @@
-// lib/core/api_service.dart
 // ignore_for_file: empty_catches
 
 import 'dart:convert';
@@ -7,6 +6,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/secure_storage_service.dart';
 import 'constants.dart';
+import '../core/logger.dart';
 
 class ApiService {
   static String? _token;
@@ -21,7 +21,7 @@ class ApiService {
       _token = await SecureStorageService.getToken();
       _isInitialized = true;
     } catch (e) {
-      print('❌ Error loading token: $e');
+      logDebug('❌ Error loading token: $e');
       _isInitialized = true;
     }
   }
@@ -35,7 +35,7 @@ class ApiService {
         await SecureStorageService.deleteToken();
       }
     } catch (e) {
-      print('❌ Error saving token: $e');
+      logDebug('❌ Error saving token: $e');
     }
   }
 
@@ -44,7 +44,7 @@ class ApiService {
     try {
       await SecureStorageService.deleteToken();
     } catch (e) {
-      print('❌ Error clearing token: $e');
+      logDebug('❌ Error clearing token: $e');
     }
   }
 
@@ -156,10 +156,6 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getSubjects() async {
-    // Prefer the public enriched endpoint: it returns `ta_name` + `doctor_name`
-    // already joined (exactly like the web dashboard) and never returns 403.
-    // The raw /database/subjects.json only has `ta_id`, so the TA name would
-    // never resolve without it.
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.baseUrl}/api/subjects-public'),
@@ -167,16 +163,15 @@ class ApiService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
-          print('📚 Loaded ${data.length} subjects (enriched)');
+          logDebug('📚 Loaded ${data.length} subjects (enriched)');
           return data;
         }
       }
-      print('⚠️ subjects-public => ${res.statusCode}, trying raw file...');
+      logDebug('⚠️ subjects-public => ${res.statusCode}, trying raw file...');
     } catch (e) {
-      print('⚠️ subjects-public exception: $e, trying raw file...');
+      logDebug('⚠️ subjects-public exception: $e, trying raw file...');
     }
 
-    // Fallback: raw static file.
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.baseUrl}${AppConstants.subjectsEndpoint}'),
@@ -227,7 +222,6 @@ class ApiService {
   // ================= TEACHING ASSISTANTS =================
 
   static Future<List<dynamic>> getTeachingAssistants() async {
-    // 1) Doctor-accessible endpoint (admin / it / doctor).
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.baseUrl}/api/teaching-assistants-list'),
@@ -236,16 +230,15 @@ class ApiService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
-          print('👥 Loaded ${data.length} TAs from list endpoint');
+          logDebug('👥 Loaded ${data.length} TAs from list endpoint');
           return data;
         }
       }
-      print('⚠️ TA list endpoint => ${res.statusCode}, trying fallback...');
+      logDebug('⚠️ TA list endpoint => ${res.statusCode}, trying fallback...');
     } catch (e) {
-      print('⚠️ TA list exception: $e, trying fallback...');
+      logDebug('⚠️ TA list exception: $e, trying fallback...');
     }
 
-    // 2) Original endpoint (admin / it / mng / emp).
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.baseUrl}/api/teaching-assistants'),
@@ -254,17 +247,15 @@ class ApiService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
-          print('👥 Loaded ${data.length} TAs from main endpoint');
+          logDebug('👥 Loaded ${data.length} TAs from main endpoint');
           return data;
         }
       }
-      print('⚠️ TA main endpoint => ${res.statusCode}, trying static file...');
+      logDebug('⚠️ TA main endpoint => ${res.statusCode}, trying static file...');
     } catch (e) {
-      print('⚠️ TA main exception: $e, trying static file...');
+      logDebug('⚠️ TA main exception: $e, trying static file...');
     }
 
-    // 3) Static public file — always accessible (students & TAs included).
-    //    This is the same data served by /database, so it never returns 403.
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.baseUrl}/database/teaching_assistants.json'),
@@ -272,16 +263,16 @@ class ApiService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
-          print('👥 Loaded ${data.length} TAs from static file');
+          logDebug('👥 Loaded ${data.length} TAs from static file');
           return data;
         }
       }
-      print('❌ TA static file => ${res.statusCode}');
+      logDebug('❌ TA static file => ${res.statusCode}');
     } catch (e) {
-      print('❌ TA static file exception => $e');
+      logDebug('❌ TA static file exception => $e');
     }
 
-    print('❌ All TA sources failed — returning empty list');
+    logDebug('❌ All TA sources failed — returning empty list');
     return [];
   }
 
@@ -588,9 +579,6 @@ class ApiService {
 
   // ================= TA SUBJECT PERMISSIONS (NEW - per subject) =================
 
-  // The server stores per-subject TA permissions under these exact keys.
-  // The UI works with the friendlier `can_activate_session` / `can_manage_grades`
-  // names, so we translate in both directions here.
   static const String _kTaSessionPerm = 'ta.session.activate';
   static const String _kTaGradesPerm = 'ta.grades.manage';
 
@@ -615,10 +603,10 @@ class ApiService {
           'can_manage_grades': perms[_kTaGradesPerm] ?? true,
         };
       }
-      print('⚠️ getTASubjectPermissions => ${response.statusCode}');
+      logDebug('⚠️ getTASubjectPermissions => ${response.statusCode}');
       return {'can_activate_session': true, 'can_manage_grades': true};
     } catch (e) {
-      print('❌ getTASubjectPermissions exception => $e');
+      logDebug('❌ getTASubjectPermissions exception => $e');
       return {'can_activate_session': true, 'can_manage_grades': true};
     }
   }
@@ -630,7 +618,6 @@ class ApiService {
     required String token,
   }) async {
     try {
-      // Translate UI keys → server permission keys (accept either form).
       final serverPerms = {
         _kTaSessionPerm: permissions['can_activate_session'] ??
             permissions[_kTaSessionPerm] ??
@@ -663,20 +650,10 @@ class ApiService {
 
   // ================= AVATAR REMOVAL =================
 
-  // 1×1 transparent PNG — used to register the avatar before deleting it.
   static final List<int> _blankPng = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNg'
       'AAIAAAUAAen63NgAAAAASUVORK5CYII=');
 
-  /// Reliably removes a profile avatar.
-  ///
-  /// The server's DELETE endpoint only unlinks the file when
-  /// `avatars_info.json` has a record for it — a photo uploaded from the web
-  /// (or a record that drifted) won't be deleted and keeps coming back.
-  /// To guarantee removal we first POST a tiny placeholder image (which
-  /// re-creates that record) and then DELETE, so the file is really gone.
-  ///
-  /// [kind] is `'student'` or `'doctor'`.
   static Future<bool> forceRemoveAvatar({
     required String kind,
     required String id,
@@ -684,7 +661,6 @@ class ApiService {
   }) async {
     final url = '${AppConstants.baseUrl}/api/$kind/avatar/$id';
 
-    // 1) Register the avatar so the server's DELETE can find it.
     try {
       final req = http.MultipartRequest('POST', Uri.parse(url));
       req.headers['Authorization'] = 'Bearer $token';
@@ -696,19 +672,18 @@ class ApiService {
       ));
       await req.send();
     } catch (e) {
-      print('⚠️ Avatar placeholder upload failed: $e');
+      logDebug('⚠️ Avatar placeholder upload failed: $e');
     }
 
-    // 2) Now delete it for real.
     try {
       final res = await http.delete(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
-      print('🗑️ Avatar delete ($kind/$id) => ${res.statusCode}');
+      logDebug('🗑️ Avatar delete ($kind/$id) => ${res.statusCode}');
       return res.statusCode == 200;
     } catch (e) {
-      print('❌ Avatar delete failed: $e');
+      logDebug('❌ Avatar delete failed: $e');
       return false;
     }
   }
@@ -727,7 +702,7 @@ class ApiService {
         },
         body: jsonEncode({'ta_id': taId}),
       );
-      
+
       if (response.statusCode == 200) {
         return {'success': true};
       }
@@ -751,7 +726,7 @@ class ApiService {
         },
         body: jsonEncode({'ta_id': null}),
       );
-      
+
       if (response.statusCode == 200) {
         return {'success': true};
       }
@@ -759,29 +734,6 @@ class ApiService {
       return {'success': false, 'error': errorData['error'] ?? 'Failed to remove TA'};
     } catch (e) {
       return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  // ================= SYNC STATUS =================
-
-  static Future<Map<String, dynamic>> getSyncStatus(int lastUpdate) async {
-    try {
-      final response = await http.get(Uri.parse('${AppConstants.baseUrl}/api/sync/status?lastUpdate=$lastUpdate'), headers: _headers);
-      return response.statusCode == 200 ? jsonDecode(response.body) : {'hasUpdates': false};
-    } catch (e) {
-      return {'hasUpdates': false};
-    }
-  }
-
-  static Future<Map<String, dynamic>> checkForMobileUpdates(String token, int lastTimestamp) async {
-    try {
-      final response = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/mobile/notify/poll?lastTimestamp=$lastTimestamp'),
-        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
-      );
-      return response.statusCode == 200 ? jsonDecode(response.body) : {'hasUpdate': false};
-    } catch (e) {
-      return {'hasUpdate': false};
     }
   }
 }

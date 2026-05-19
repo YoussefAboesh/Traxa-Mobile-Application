@@ -1,4 +1,3 @@
-// lib/screens/sections/doctor/doctor_subjects.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -8,6 +7,7 @@ import '../../../models/subject.dart';
 import '../../../models/teaching_assistant.dart';
 import '../../../core/theme.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 class DoctorSubjects extends StatefulWidget {
   const DoctorSubjects({super.key});
@@ -31,7 +31,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
     try {
       await context.read<DataCubit>().loadAllData();
     } catch (e) {
-      print('Error refreshing subjects: $e');
+      logDebug('Error refreshing subjects: $e');
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
@@ -53,15 +53,15 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
     List<Subject> doctorSubjects = [];
     List<TeachingAssistant> allTAs = dataState.teachingAssistants;
 
-    print('🔍 DEBUG: currentSemester = $currentSemester');
-    print('🔍 DEBUG: dataState.subjects count = ${dataState.subjects.length}');
-    print('🔍 DEBUG: allTAs count = ${allTAs.length}');
+    logDebug('🔍 DEBUG: currentSemester = $currentSemester');
+    logDebug('🔍 DEBUG: dataState.subjects count = ${dataState.subjects.length}');
+    logDebug('🔍 DEBUG: allTAs count = ${allTAs.length}');
 
     if (isTA) {
       // =========================
       // TA SUBJECTS
       // =========================
-      // المعيد: المواد اللي ليه سكاشن فيها (في الترم الحالي)
+      // TA: the subjects they have sections for (in the current semester)
       final loggedUserId = user?.id ?? 0;
 
       final taSubjectIds = dataState.allSections
@@ -73,7 +73,7 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
           .where((subject) => taSubjectIds.contains(subject.id))
           .toList();
 
-      print('✅ TA Sections subjects => ${doctorSubjects.length}');
+      logDebug('✅ TA Sections subjects => ${doctorSubjects.length}');
     } else {
       // =========================
       // DOCTOR SUBJECTS
@@ -84,10 +84,9 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
         return subject.doctorId == doctorId;
       }).toList();
 
-      print('👨‍⚕️ Doctor Subjects => ${doctorSubjects.length}');
+      logDebug('👨‍⚕️ Doctor Subjects => ${doctorSubjects.length}');
     }
 
-    // فلترة حسب البحث
     if (_searchQuery.isNotEmpty) {
       doctorSubjects = doctorSubjects
           .where((s) =>
@@ -97,13 +96,11 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
           .toList();
     }
 
-    // فلترة حسب المستوى
     if (_selectedLevel != 0) {
       doctorSubjects =
           doctorSubjects.where((s) => s.level == _selectedLevel).toList();
     }
 
-    // تجميع المواد حسب المستوى
     final Map<int, List<Subject>> subjectsByLevel = {};
     for (final level in _levels) {
       final levelSubjects =
@@ -123,7 +120,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            // Header with semester info
             SliverAppBar(
               title: const Text('My Subjects'),
               centerTitle: false,
@@ -151,7 +147,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
               ],
             ),
 
-            // Search and Filters
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.all(16.r),
@@ -167,7 +162,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                 ),
                 child: Column(
                   children: [
-                    // Search Field
                     TextField(
                       style: TextStyle(
                         color: isDark ? Colors.white : const Color(0xFF1E293B),
@@ -218,10 +212,8 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
 
                     SizedBox(height: 12.h),
 
-                    // Filter Row
                     Row(
                       children: [
-                        // Filter button
                         GestureDetector(
                           onTap: () =>
                               setState(() => _showFilters = !_showFilters),
@@ -278,7 +270,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           ),
                         ),
 
-                        // Level Dropdown — يظهر/يختفي حسب زرار الفلتر
                         if (_showFilters) ...[
                           SizedBox(width: 12.w),
                           Expanded(
@@ -335,7 +326,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
               ),
             ),
 
-            // Subjects List by Level
             if (subjectsByLevel.isNotEmpty)
               SliverList(
                 delegate: SliverChildListDelegate(
@@ -349,7 +339,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Level Header
                           Container(
                             padding: EdgeInsets.symmetric(
                                 vertical: 10.h, horizontal: 16.w),
@@ -390,7 +379,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                           ),
                           SizedBox(height: 12.h),
 
-                          // Subjects table
                           _buildSubjectsTable(levelSubjects, allTAs, isTA),
 
                           SizedBox(height: 8.h),
@@ -401,7 +389,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                 ),
               ),
 
-            // Empty state
             if (subjectsByLevel.isEmpty)
               SliverToBoxAdapter(
                 child: Container(
@@ -462,9 +449,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
   Widget _buildSubjectsTable(List<Subject> subjects, List<TeachingAssistant> allTAs, bool isTA) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Resolve the TA name for a subject. The enriched /api/subjects-public
-    // endpoint already joins `ta_name`, so prefer that; only fall back to the
-    // TA list lookup when the name didn't come with the subject.
     String getTAName(Subject subject) {
       if (subject.taName != null && subject.taName!.trim().isNotEmpty) {
         return subject.taName!;
@@ -495,7 +479,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
       ),
       child: Column(
         children: [
-          // Table Header
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
             decoration: BoxDecoration(
@@ -564,7 +547,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
             ),
           ),
 
-          // Table Rows
           ...subjects.asMap().entries.map((entry) {
             final subject = entry.value;
             final isLast = entry.key == subjects.length - 1;
@@ -585,7 +567,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Code
                   Expanded(
                     flex: 4,
                     child: Text(
@@ -601,7 +582,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     ),
                   ),
                   SizedBox(width: 8.w),
-                  // Subject Name
                   Expanded(
                     flex: 6,
                     child: Text(
@@ -616,7 +596,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     ),
                   ),
                   SizedBox(width: 8.w),
-                  // TA Name (for Doctor) or Doctor Name (for TA)
                   Expanded(
                     flex: 7,
                     child: Container(
@@ -641,7 +620,6 @@ class _DoctorSubjectsState extends State<DoctorSubjects> {
                     ),
                   ),
                   SizedBox(width: 8.w),
-                  // Department
                   Expanded(
                     flex: 5,
                     child: Container(

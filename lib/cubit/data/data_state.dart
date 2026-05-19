@@ -1,4 +1,3 @@
-// lib/cubit/data/data_state.dart
 import 'package:equatable/equatable.dart';
 import '../../models/student.dart';
 import '../../models/doctor.dart';
@@ -17,7 +16,7 @@ class DataState extends Equatable {
   final List<Lecture> lectures;
   final List<Subject> allSubjects;
   final List<Lecture> allLectures;
-  final List<Section> allSections; // ← جديد
+  final List<Section> allSections;
   final List<Grade> grades;
   final List<Grade> allGrades;
   final List<AttendanceRecord> attendance;
@@ -33,7 +32,7 @@ class DataState extends Equatable {
     this.lectures = const [],
     this.allSubjects = const [],
     this.allLectures = const [],
-    this.allSections = const [], // ← جديد
+    this.allSections = const [],
     this.grades = const [],
     this.allGrades = const [],
     this.attendance = const [],
@@ -50,7 +49,7 @@ class DataState extends Equatable {
     List<Lecture>? lectures,
     List<Subject>? allSubjects,
     List<Lecture>? allLectures,
-    List<Section>? allSections, // ← جديد
+    List<Section>? allSections,
     List<Grade>? grades,
     List<Grade>? allGrades,
     List<AttendanceRecord>? attendance,
@@ -66,7 +65,7 @@ class DataState extends Equatable {
       lectures: lectures ?? this.lectures,
       allSubjects: allSubjects ?? this.allSubjects,
       allLectures: allLectures ?? this.allLectures,
-      allSections: allSections ?? this.allSections, // ← جديد
+      allSections: allSections ?? this.allSections,
       grades: grades ?? this.grades,
       allGrades: allGrades ?? this.allGrades,
       attendance: attendance ?? this.attendance,
@@ -85,7 +84,7 @@ class DataState extends Equatable {
         lectures,
         allSubjects,
         allLectures,
-        allSections, // ← جديد
+        allSections,
         grades,
         allGrades,
         attendance,
@@ -119,7 +118,6 @@ class DataState extends Equatable {
         .toList();
   }
 
-  /// السكاشن الخاصة بطالب معين حسب level + department
   List<Section> getSectionsForStudent(Student student) {
     return allSections
         .where((s) =>
@@ -160,7 +158,7 @@ class DataState extends Equatable {
     required List<Lecture> lectures,
     List<Subject>? allSubjects,
     List<Lecture>? allLectures,
-    List<Section>? allSections, // ← جديد
+    List<Section>? allSections,
     int? currentSemester,
     String? currentAcademicYear, required List<TeachingAssistant> teachingAssistants,
   }) =>
@@ -171,7 +169,7 @@ class DataState extends Equatable {
         lectures: lectures,
         allSubjects: allSubjects ?? subjects,
         allLectures: allLectures ?? lectures,
-        allSections: allSections ?? const [], // ← جديد
+        allSections: allSections ?? const [],
         currentSemester: currentSemester ?? 1,
         currentAcademicYear: currentAcademicYear ?? '2026-2027',
         loadingState: LoadingState.loaded(),

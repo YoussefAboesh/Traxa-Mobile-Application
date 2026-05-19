@@ -1,4 +1,3 @@
-// lib/widgets/error_widget.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../core/theme.dart';
@@ -7,7 +6,7 @@ class CustomErrorWidget extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
   final IconData? icon;
-  
+
   const CustomErrorWidget({
     super.key,
     required this.message,
@@ -34,8 +33,8 @@ class CustomErrorWidget extends StatelessWidget {
               style: TextStyle(
                 fontSize: 20.sp,
                 fontWeight: FontWeight.bold,
-                color: Theme.of(context).brightness == Brightness.dark 
-                    ? Colors.white 
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
                     : const Color(0xFF1E293B),
               ),
               textAlign: TextAlign.center,
@@ -45,8 +44,8 @@ class CustomErrorWidget extends StatelessWidget {
               message,
               style: TextStyle(
                 fontSize: 14.sp,
-                color: Theme.of(context).brightness == Brightness.dark 
-                    ? const Color(0xFF94A3B8) 
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF94A3B8)
                     : const Color(0xFF64748B),
               ),
               textAlign: TextAlign.center,

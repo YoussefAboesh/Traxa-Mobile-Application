@@ -1,5 +1,3 @@
-// lib/core/pdf_report_service.dart
-// English-only attendance report (Arabic support removed).
 import 'dart:io';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -15,14 +13,16 @@ class PdfReportService {
       final subjectName = report['subjectName'] ?? 'Unknown Subject';
       final subjectCode = report['subjectCode'] ?? '';
       final doctorName = report['doctorName'] ?? '';
-      // Match the website fields: startTime / endTime. createdAt is the
-      // *report-saved* timestamp and must NOT be used as session start.
-      final startTime = (report['startTime'] ??
+      // Prefer the ISO copies (startTimeIso/endTimeIso) when present, then
+      // fall back to the display strings. _time12 handles both formats.
+      final startTime = (report['startTimeIso'] ??
+              report['startTime'] ??
               report['start_time'] ??
               report['startedAt'] ??
               '')
           .toString();
-      final endTime = (report['endTime'] ??
+      final endTime = (report['endTimeIso'] ??
+              report['endTime'] ??
               report['end_time'] ??
               report['endedAt'] ??
               report['ended_at'] ??
@@ -57,9 +57,6 @@ class PdfReportService {
             subjectName,
             subjectCode,
             doctorName,
-            // Use a reliable full timestamp for the header date so it never
-            // renders a bare time (website reports may put a time in
-            // startTime).
             _dateOnly((report['createdAt'] ??
                     report['created_at'] ??
                     report['date'] ??
@@ -86,37 +83,34 @@ class PdfReportService {
         ],
       ));
 
-      // Save
       final dir = await getApplicationDocumentsDirectory();
       final fileName = 'Report_${subjectName.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(await pdf.save());
 
-      // Also save to Downloads if possible
       try {
         final dl = Directory('/storage/emulated/0/Download');
-        if (await dl.exists()) { 
-          await File('${dl.path}/$fileName').writeAsBytes(await pdf.save()); 
+        if (await dl.exists()) {
+          await File('${dl.path}/$fileName').writeAsBytes(await pdf.save());
         }
       } catch (_) {}
 
-      // Open
       final result = await OpenFile.open(file.path);
       if (result.type != ResultType.done && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('PDF saved: ${file.path}'), 
-            backgroundColor: Colors.green, 
+            content: Text('PDF saved: ${file.path}'),
+            backgroundColor: Colors.green,
             duration: const Duration(seconds: 5)
           )
         );
       }
       return true;
     } catch (e) {
-      if (context.mounted) { 
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('PDF Error: $e'), backgroundColor: Colors.red)
-        ); 
+        );
       }
       return false;
     }
@@ -199,7 +193,6 @@ class PdfReportService {
       6: const pw.FixedColumnWidth(58),
     };
 
-    // A plain padded text cell.
     pw.Widget cell(String text,
         {PdfColor? color,
         bool bold = false,
@@ -216,7 +209,6 @@ class PdfReportService {
     }
 
     final rows = <pw.TableRow>[
-      // Header
       pw.TableRow(
         decoration: pw.BoxDecoration(color: PdfColor.fromHex('#8B5CF6')),
         children: headers
@@ -246,9 +238,6 @@ class PdfReportService {
       final hasFace = faceRaw.isNotEmpty;
       final hasQr = qrRaw.isNotEmpty || s['confirmedByQR'] == true;
 
-      // ── Duration = QR time − Face time, ONLY when the student did both.
-      // If only one (or neither) happened the student is still Pending and
-      // no duration is calculated.
       String duration = '-';
       if (hasFace && qrRaw.isNotEmpty) {
         final f = DateTime.tryParse(faceRaw);
@@ -292,7 +281,6 @@ class PdfReportService {
                   s['name'] ??
                   'Unknown')
               .toString()),
-          // Coloured status cell — the most important column.
           pw.Container(
             alignment: pw.Alignment.center,
             color: statusBg,
@@ -323,14 +311,38 @@ class PdfReportService {
     );
   }
 
-  static String _time12(String iso) {
-    if (iso.isEmpty) return '-';
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
-      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-      return '$h:${dt.minute.toString().padLeft(2, '0')} $ampm';
-    } catch (_) { return '-'; }
+  /// Formats a start/end time to a 12-hour clock string.
+  /// Accepts either a full ISO datetime OR an already-formatted clock
+  /// string (e.g. "8:05:23 PM", "20:16"). Website- and app-made reports
+  /// store this field differently, so both must be handled.
+  static String _time12(String raw) {
+    if (raw.isEmpty) return '-';
+
+    // Full ISO datetime.
+    final dt = DateTime.tryParse(raw);
+    if (dt != null) {
+      final l = dt.toLocal();
+      final h = l.hour > 12 ? l.hour - 12 : (l.hour == 0 ? 12 : l.hour);
+      final ampm = l.hour >= 12 ? 'PM' : 'AM';
+      return '$h:${l.minute.toString().padLeft(2, '0')} $ampm';
+    }
+
+    // Already a clock string ("HH:mm[:ss]" optionally with AM/PM).
+    final m = RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$')
+        .firstMatch(raw.trim());
+    if (m != null) {
+      var hour = int.parse(m.group(1)!);
+      final minute = m.group(2)!;
+      var ampm = m.group(3)?.toUpperCase();
+      if (ampm == null) {
+        ampm = hour >= 12 ? 'PM' : 'AM';
+        if (hour > 12) hour -= 12;
+        if (hour == 0) hour = 12;
+      }
+      return '$hour:$minute $ampm';
+    }
+
+    return raw;
   }
 
   static String _dateOnly(String iso) {

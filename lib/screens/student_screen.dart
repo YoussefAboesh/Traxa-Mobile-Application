@@ -1,4 +1,3 @@
-// lib/screens/student_screen.dart
 // ignore_for_file: invalid_null_aware_operator, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
@@ -13,6 +12,8 @@ import 'sections/student/student_overview.dart';
 import 'sections/student/student_schedule.dart';
 import 'sections/student/student_grades.dart';
 import 'sections/student/student_profile.dart';
+import '../widgets/error_widget.dart';
+import '../core/logger.dart';
 
 class StudentScreen extends StatefulWidget {
   const StudentScreen({super.key});
@@ -25,11 +26,9 @@ class _StudentScreenState extends State<StudentScreen> {
   int _selectedIndex = 0;
   bool _isReloading = false;
 
-  // Local variables for immediate UI update
   String _localAcademicYear = '2026-2027';
   int _localSemester = 1;
 
-  // Store the new year from WebSocket
   String _pendingAcademicYear = '';
 
   final List<Widget> _sections = [
@@ -72,7 +71,7 @@ class _StudentScreenState extends State<StudentScreen> {
 
   Future<void> _loadFreshDataOnStart() async {
     try {
-      print('🔄 Loading fresh data on app start...');
+      logDebug('🔄 Loading fresh data on app start...');
       await context.read<DataCubit>().fullReload();
 
       final authState = context.read<AuthCubit>().state;
@@ -90,9 +89,9 @@ class _StudentScreenState extends State<StudentScreen> {
           _localSemester = updatedState.currentSemester;
         });
       }
-      print('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
+      logDebug('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
     } catch (e) {
-      print('❌ Error loading fresh data: $e');
+      logDebug('❌ Error loading fresh data: $e');
     }
   }
 
@@ -101,7 +100,7 @@ class _StudentScreenState extends State<StudentScreen> {
     setState(() => _isReloading = true);
 
     try {
-      print('🔄 StudentScreen: Full reload started...');
+      logDebug('🔄 StudentScreen: Full reload started...');
 
       final savedYear = _localAcademicYear;
 
@@ -126,7 +125,7 @@ class _StudentScreenState extends State<StudentScreen> {
         _localSemester = dataState.currentSemester;
       });
 
-      print(
+      logDebug(
           '✅ StudentScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
 
       if (mounted) {
@@ -148,7 +147,7 @@ class _StudentScreenState extends State<StudentScreen> {
         );
       }
     } catch (e) {
-      print('❌ Full reload error: $e');
+      logDebug('❌ Full reload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -174,12 +173,29 @@ class _StudentScreenState extends State<StudentScreen> {
     }
   }
 
+  bool _sessionExpiredHandled = false;
+
+  void _handleSessionExpired() {
+    if (!mounted || _sessionExpiredHandled) return;
+    _sessionExpiredHandled = true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Session expired. Please login again.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+      ),
+    );
+    context.read<DataCubit>().clearData();
+    context.read<AuthCubit>().logout();
+  }
+
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
-      print('📢 WebSocket - Semester changed to: S$semester');
+      logDebug('📢 WebSocket - Semester changed to: S$semester');
 
       setState(() {
         _localSemester = semester;
@@ -190,7 +206,7 @@ class _StudentScreenState extends State<StudentScreen> {
 
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
-      print('📢 WebSocket - Academic year changed to: $year');
+      logDebug('📢 WebSocket - Academic year changed to: $year');
 
       setState(() {
         _pendingAcademicYear = year;
@@ -250,7 +266,7 @@ class _StudentScreenState extends State<StudentScreen> {
 
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
-      print('📢 Levels promoted - Auto reloading...');
+      logDebug('📢 Levels promoted - Auto reloading...');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Levels promoted - Reloading data...'),
@@ -267,10 +283,14 @@ class _StudentScreenState extends State<StudentScreen> {
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
+      if (type == 'TOKEN_EXPIRED') {
+        _handleSessionExpired();
+        return;
+      }
       if (type == 'DATA_CHANGE') {
         final entity = data['entity'] as String?;
         final action = data['action'] as String?;
-        print('📱 StudentScreen: Data change - $entity / $action');
+        logDebug('📱 StudentScreen: Data change - $entity / $action');
 
         if (entity == 'grade') {
           final authState = context.read<AuthCubit>().state;
@@ -291,7 +311,7 @@ class _StudentScreenState extends State<StudentScreen> {
           context.read<DataCubit>().loadAllData();
         }
       } else if (type == 'FULL_SYNC') {
-        print('📱 Full sync received - Auto reloading...');
+        logDebug('📱 Full sync received - Auto reloading...');
         _fullReload();
       }
     });
@@ -301,12 +321,23 @@ class _StudentScreenState extends State<StudentScreen> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final user = authState.user;
+    final dataState = context.watch<DataCubit>().state;
+
+    if (dataState.loadingState.hasError &&
+        (dataState.loadingState.errorMessage ?? '').contains('Session expired')) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _handleSessionExpired());
+    }
 
     if (user == null) {
       return const Scaffold(
         body: Center(child: Text('User not found')),
       );
     }
+
+    final hasFatalError = dataState.loadingState.hasError &&
+        dataState.students.isEmpty &&
+        dataState.subjects.isEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -353,8 +384,6 @@ class _StudentScreenState extends State<StudentScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            // الريفريش بقى بيظهر Skeleton جوّه الصفحة بدل الدايرة التقليدية،
-            // فالزرار بيفضل أيقونة بس بتبهت شوية أثناء التحميل.
             icon: Icon(
               Icons.refresh_rounded,
               color: Theme.of(context).primaryColor.withValues(
@@ -393,7 +422,13 @@ class _StudentScreenState extends State<StudentScreen> {
           ),
         ],
       ),
-      body: _sections[_selectedIndex],
+      body: hasFatalError
+          ? CustomErrorWidget(
+              message:
+                  dataState.loadingState.errorMessage ?? 'Failed to load data',
+              onRetry: _isReloading ? null : _fullReload,
+            )
+          : _sections[_selectedIndex],
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [

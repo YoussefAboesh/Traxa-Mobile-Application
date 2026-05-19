@@ -1,4 +1,3 @@
-// lib/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -7,6 +6,7 @@ import '../cubit/auth/auth_cubit.dart';
 import '../cubit/auth/auth_state.dart';
 import '../cubit/data/data_cubit.dart';
 import '../core/utils/error_handler.dart';
+import '../core/logger.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -68,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
           final dataCubit = context.read<DataCubit>();
           final userName = state.user?.name ?? "User";
 
-          print('✅ Login successful, loading fresh data...');
+          logDebug('✅ Login successful, loading fresh data...');
 
           await dataCubit.fullReload();
 
@@ -104,7 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Platform Logo مع أنيميشن
                     TweenAnimationBuilder(
                       tween: Tween<double>(begin: 0, end: 1),
                       duration: const Duration(milliseconds: 800),
@@ -140,7 +139,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     SizedBox(height: 40.h),
 
-                    // Toggle بين Student و Doctor
                     Container(
                       padding: EdgeInsets.all(4.r),
                       decoration: BoxDecoration(
@@ -168,7 +166,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     SizedBox(height: 40.h),
 
-                    // Form Card
                     Container(
                       decoration: BoxDecoration(
                         color: Theme.of(context).cardColor,
@@ -190,7 +187,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           key: _formKey,
                           child: Column(
                             children: [
-                              // عنوان الفورم
                               Row(
                                 children: [
                                   Container(
@@ -233,7 +229,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               SizedBox(height: 24.h),
 
-                              // Username Field
                               TextFormField(
                                 controller: _usernameController,
                                 style: TextStyle(
@@ -286,7 +281,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               SizedBox(height: 16.h),
 
-                              // Password Field
                               TextFormField(
                                 controller: _passwordController,
                                 obscureText: _obscurePassword,
@@ -348,7 +342,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               SizedBox(height: 28.h),
 
-                              // Login Button
                               AnimatedContainer(
                                 duration: const Duration(milliseconds: 200),
                                 width: double.infinity,
@@ -389,9 +382,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                             color: Colors.white,
                                           ),
                                         )
-                                      // FittedBox guarantees the label + icon
-                                      // always fit inside the button on any
-                                      // screen size / font scale.
                                       : FittedBox(
                                           fit: BoxFit.scaleDown,
                                           child: Row(
@@ -451,8 +441,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(40.r),
           ),
-          // FittedBox keeps the icon + label inside the tab on narrow phones
-          // ("Doctor / TA" is the widest label) instead of overflowing.
           child: FittedBox(
             fit: BoxFit.scaleDown,
             child: Row(

@@ -1,16 +1,7 @@
-// lib/widgets/app_skeleton.dart
-//
-// نظام التحميل الحديث (Skeleton) المستخدم في كل التطبيق بدلاً من شكل
-// الدائرة التقليدي (CircularProgressIndicator).
-//
-// • AppSkeleton: غلاف بسيط بيحوّل أي محتوى لـ skeleton لما enabled = true.
-// • SkeletonCardList: قائمة كروت وهمية تُعرض في أماكن التحميل الكامل
-//   (لما مفيش بيانات حقيقية نعملها skeleton).
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
-/// غلاف موحّد للـ Skeletonizer — بيخلي كل الشاشات تستخدم نفس التأثير.
 class AppSkeleton extends StatelessWidget {
   final bool enabled;
   final Widget child;
@@ -41,12 +32,10 @@ class AppSkeleton extends StatelessWidget {
   }
 }
 
-/// قائمة كروت وهمية (placeholder) — تُستخدم كبديل لشاشة التحميل الكاملة.
 class SkeletonCardList extends StatelessWidget {
   final int itemCount;
   final EdgeInsetsGeometry padding;
 
-  /// لما يكون جوّه Column/Sliver محتاج shrinkWrap.
   final bool shrinkWrap;
 
   const SkeletonCardList({

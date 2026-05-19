@@ -1,4 +1,3 @@
-// lib/models/user.dart
 class User {
   final int id;
   final String username;
@@ -10,10 +9,9 @@ class User {
   final String? supervisorDoctorName;
   final int? taId;
   final Map<String, dynamic>? permissions;
-  // صلاحيات المعيد لكل مادة — المفتاح = subjectId كنص، القيمة { 'ta.session.activate': bool, 'ta.grades.manage': bool }
   final Map<String, dynamic>? taPermissions;
-  final String? department;   // ✅ أضف هذا
-  final int? level;           // ✅ أضف هذا
+  final String? department;
+  final int? level;
 
   User({
     required this.id,
@@ -27,8 +25,8 @@ class User {
     this.taId,
     this.permissions,
     this.taPermissions,
-    this.department,    // ✅
-    this.level,         // ✅
+    this.department,
+    this.level,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -46,8 +44,8 @@ class User {
       taPermissions: json['taPermissions'] != null
           ? Map<String, dynamic>.from(json['taPermissions'])
           : null,
-      department: json['department'],   // ✅
-      level: json['level'],             // ✅
+      department: json['department'],
+      level: json['level'],
     );
   }
 
@@ -64,8 +62,8 @@ class User {
       'taId': taId,
       'permissions': permissions,
       'taPermissions': taPermissions,
-      'department': department,   // ✅
-      'level': level,             // ✅
+      'department': department,
+      'level': level,
     };
   }
 
@@ -83,8 +81,6 @@ class User {
     return v == true;
   }
 
-  /// هل المعيد مسموح له يفعّل/ينهي سيشن للمادة دي؟
-  /// الافتراضي مسموح (زي السيرفر) — بيتقفل بس لو الدكتور قفله صراحةً.
   bool canActivateSessionForSubject(int subjectId) {
     if (!isTeachingAssistant) return true;
     final p = taPermissions?['$subjectId'];

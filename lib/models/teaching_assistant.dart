@@ -1,5 +1,3 @@
-// lib/models/teaching_assistant.dart
-
 class TeachingAssistant {
   final int id;
   final String name;
@@ -49,11 +47,11 @@ class TeachingAssistant {
   }
 
   bool get hasPermissions => permissions != null && permissions!.isNotEmpty;
-  
+
   bool hasPermission(String key) {
     if (permissions == null) return false;
     return permissions![key] == true;
   }
-  
+
   bool get isAssignedToSubject => assignedSubjectIds.isNotEmpty;
 }

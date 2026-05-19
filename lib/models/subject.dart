@@ -1,4 +1,3 @@
-// lib/models/subject.dart
 class Subject {
   final int id;
   final String? code;
@@ -10,7 +9,7 @@ class Subject {
   final String? department;
   final int? credits;
   final int? creditHours;
-  // ── TA fields (من نفس الـ subjects endpoint أو joined) ──────────────────
+  // ── TA fields (from the subjects endpoint or joined) ──────────────────
   final int? taId;
   final String? taName;
 
@@ -47,7 +46,6 @@ class Subject {
       department: json['department'],
       credits: json['credits'],
       creditHours: json['credit_hours'] ?? json['creditHours'],
-      // اقبل أي شكل للـ key جاي من الـ backend
       taId: json['ta_id'] ?? json['taId'] ?? json['teaching_assistant_id'],
       taName: json['ta_name'] ??
           json['taName'] ??

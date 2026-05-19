@@ -1,4 +1,3 @@
-// lib/screens/sections/doctor/doctor_ta_management.dart
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:async';
@@ -14,6 +13,7 @@ import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
 import '../../../widgets/app_skeleton.dart';
 import '../../../core/api_service.dart';
+import '../../../core/logger.dart';
 
 class DoctorTAManagement extends StatefulWidget {
   const DoctorTAManagement({super.key});
@@ -31,11 +31,9 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
   void initState() {
     super.initState();
     _loadData();
-    // أي تغيير في صلاحيات المعيدين على الويب → إعادة تحميل.
     _wsSub = WebSocketService.instance.taPermissionsStream.listen((_) {
       if (mounted) _loadData();
     });
-    // أي تعيين/إلغاء معيد لمادة على الويب → إعادة تحميل.
     _dataSub = WebSocketService.instance.dataChangeStream.listen((data) {
       final entity = data['entity'] as String?;
       if (mounted && (entity == 'subject' || entity == 'teaching-assistant')) {
@@ -55,28 +53,21 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
     setState(() => _loading = true);
     await context.read<DataCubit>().loadAllData();
     if (mounted) {
-      // Debug: confirm TAs are loaded
       final tas = context.read<DataCubit>().state.teachingAssistants;
-      print('🔍 TAs count: ${tas.length}');
+      logDebug('🔍 TAs count: ${tas.length}');
       for (final ta in tas) {
-        print('  TA: id=${ta.id} name=${ta.name} assignedSubjects=${ta.assignedSubjectIds}');
+        logDebug('  TA: id=${ta.id} name=${ta.name} assignedSubjects=${ta.assignedSubjectIds}');
       }
       setState(() => _loading = false);
     }
   }
 
-  /// P0 → subject.taId + subject.taName مباشرة من backend
-  /// P1 → subject.taId يطابق ta.id في tas list
-  /// P2 → assignedSubjectIds
   TeachingAssistant? _resolveTA(Subject subject, List<TeachingAssistant> tas) {
-    // P0: الـ subject عنده ta_id + ta_name جاهزين من /api/subjects-public
     final taName = subject.taName?.trim();
     if (subject.taId != null &&
         taName != null &&
         taName.isNotEmpty &&
         taName.toLowerCase() != 'not assigned') {
-      // Prefer the full record from the TA list (has username/email),
-      // otherwise build a lightweight one from the enriched subject.
       final match = tas.where((t) => t.id == subject.taId).toList();
       if (match.isNotEmpty) return match.first;
       return TeachingAssistant(
@@ -86,12 +77,10 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
         assignedSubjectIds: [subject.id],
       );
     }
-    // P1
     if (subject.taId != null) {
       final m = tas.where((t) => t.id == subject.taId).toList();
       if (m.isNotEmpty) return m.first;
     }
-    // P2
     final m2 = tas.where((t) => t.assignedSubjectIds.contains(subject.id)).toList();
     if (m2.isNotEmpty) return m2.first;
     return null;
@@ -397,7 +386,6 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Subject
           Expanded(
             flex: 6,
             child: Column(
@@ -442,7 +430,6 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
 
           SizedBox(width: 8.w),
 
-          // Assigned TA
           Expanded(
             flex: 6,
             child: Align(
@@ -492,7 +479,6 @@ class _DoctorTAManagementState extends State<DoctorTAManagement> {
 
           SizedBox(width: 8.w),
 
-          // Set Permissions
           SizedBox(
             width: 104.w,
             child: ElevatedButton.icon(
@@ -568,7 +554,7 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
   bool _canManageGrades = true;
   bool _isLoading = true;
   bool _isSaving = false;
-  bool _dirty = false; // فيه تعديل لسه متحفظش
+  bool _dirty = false;
   StreamSubscription? _wsSub;
   Timer? _pollTimer;
 
@@ -588,8 +574,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
         _load(silent: true);
       }
     });
-    // مزامنة مع الويب: نعيد جلب الصلاحيات كل 3 ثوانٍ طول ما الشيت مفتوح،
-    // فأي تغيير من الويب يظهر هنا أوتوماتيك من غير ريفريش.
     if (widget.assignedTA != null) {
       _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
         if (mounted && !_isSaving && !_isLoading) {
@@ -616,7 +600,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
-    // المزامنة الصامتة (polling) ماتدوسش على تعديل لسه متحفظش.
     if (silent && _dirty) return;
     if (!silent && mounted) setState(() => _isLoading = true);
     try {
@@ -703,7 +686,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
           SizedBox(height: 12.h),
           Container(
             width: 40.w,
@@ -717,7 +699,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
           ),
           SizedBox(height: 18.h),
 
-          // Header
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Row(
@@ -740,7 +721,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                           fontWeight: FontWeight.bold,
                           color: textPrimary)),
                 ),
-                // اسم المعيد والماده متشالوا من هنا — موجودين تحت في كارت المعلومات.
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
                   child: Container(
@@ -760,7 +740,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
           ),
           SizedBox(height: 14.h),
 
-          // Info card
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Container(
@@ -801,7 +780,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
           ),
           SizedBox(height: 12.h),
 
-          // Amber banner
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Container(
@@ -848,7 +826,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
           ),
           SizedBox(height: 16.h),
 
-          // Tiles
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -928,7 +905,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
 
           SizedBox(height: 20.h),
 
-          // Buttons
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 20.w),
             child: Row(

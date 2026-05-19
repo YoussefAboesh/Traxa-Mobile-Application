@@ -1,4 +1,3 @@
-// lib/screens/sections/doctor/doctor_attendance.dart
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -13,6 +12,7 @@ import '../../../models/section.dart';
 import '../../../core/constants.dart';
 import '../../../services/websocket_service.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 enum SessionPhase { none, active, confirming }
 
@@ -28,33 +28,25 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   @override
   bool get wantKeepAlive => true;
 
-  // Filters
   String _selectedDay = '';
   bool _showActiveSessions = false;
   int _selectedLevel = 0;
 
-  // Session
   SessionPhase _phase = SessionPhase.none;
   Lecture? _activeSession;
   String? _activeSessionId;
   DateTime? _sessionStartTime;
   DateTime? _sessionEndTime;
-  // The actual moment the lecturer pressed "End Lecture (Start QR)".
-  // Distinct from _sessionEndTime, which doubles as the QR phase deadline
-  // (30 minutes later) for the countdown timer. This one is what goes into
-  // the saved report's endTime so the report shows real lecture duration.
   DateTime? _lectureEndedAt;
   List<Student>? _sessionStudents;
   bool _showStudentList = false;
   bool _isActivating = false;
   bool _isFinalizing = false;
 
-  // Live attendance
   List<Map<String, dynamic>> _attendanceRecords = [];
   int _confirmedCount = 0;
   int _pendingCount = 0;
 
-  // Timers
   Timer? _heartbeatTimer;
   Timer? _pollTimer;
   Timer? _confirmTimer;
@@ -63,15 +55,10 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   bool _didCheckServer = false;
 
-  // Timestamp of the last local attendance edit. Polling skips overwriting the
-  // attendance list for a few seconds afterwards so a confirm/reject/undo does
-  // not visually "snap back" before the server has stored it.
   DateTime? _lastLocalEdit;
 
-  // صلاحيات المعيد لكل مادة (live من السيرفر) — المفتاح = subjectId كنص
   Map<String, dynamic> _taSubjectPerms = {};
 
-  // ✅ Cache for enrolled students
   final Map<int, List<Student>> _enrolledStudentsCache = {};
   final Map<int, DateTime> _cacheTimestamp = {};
   final Duration _cacheDuration = Duration(minutes: 5);
@@ -95,9 +82,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       _loadTaPermissions();
     });
     _setupWebSocketListeners();
-    // Keep syncing with the server even when no session is open locally, so a
-    // lecture started / QR-switched / closed from the website is reflected in
-    // the app automatically — no manual refresh needed.
     _startContinuousSync();
   }
 
@@ -116,7 +100,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   void _clearEnrolledStudentsCache() {
     _enrolledStudentsCache.clear();
     _cacheTimestamp.clear();
-    print('🗑️ Enrolled students cache cleared');
+    logDebug('🗑️ Enrolled students cache cleared');
   }
 
   // ============================================
@@ -138,7 +122,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
-    // Any session event → immediately sync with server (source of truth)
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
       final session = data['session'] as Map<String, dynamic>?;
@@ -177,8 +160,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       if (type == 'FULL_SYNC' || entity == 'attendance-session') {
         _syncWithServer();
       }
-      // Live attendance changes (confirm / reject from the website or another
-      // device) → refresh the attendance list instantly, no manual refresh.
       if (entity == 'active-session') {
         if (action == 'attendance-updated') {
           _refreshAttendanceNow();
@@ -186,7 +167,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           _syncWithServer();
         }
       }
-      // تحديث صلاحيات المعيد لحظيًا من غير ما يعمل ريفريش
       if (entity == 'ta-subject-permission') {
         _applyTaPermissionChange(data['data']);
       } else if (type == 'FULL_SYNC' || entity == 'subject') {
@@ -197,9 +177,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   void _startConfirmTimer() {
     _confirmTimer?.cancel();
-    // _sessionEndTime is the QR-phase DEADLINE (start + 30 min). The remaining
-    // time is simply (deadline - now) — NOT _qrDuration minus elapsed, which
-    // would double-count and show ~60 min instead of 30.
     _sessionEndTime ??= DateTime.now().add(_qrDuration);
     _confirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -238,7 +215,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     return '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
   }
 
-  // 12-hour clock string from an ISO timestamp ("6:39 AM"); '' if unparseable.
   String _fmtClock(dynamic iso) {
     final s = iso?.toString() ?? '';
     if (s.isEmpty) return '';
@@ -248,9 +224,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     return '$h:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
   }
 
-  // 12-hour clock string with seconds from a DateTime ("8:05:23 PM").
-  // Used for report time columns so the website shows a readable time
-  // instead of a raw ISO datetime.
   String _clockString(DateTime dt) {
     final l = dt.toLocal();
     final h = l.hour > 12 ? l.hour - 12 : (l.hour == 0 ? 12 : l.hour);
@@ -262,14 +235,12 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
   // ── TA / Section support ──────────────────────────────────────────────
-  // المعيد بيشتغل على "سكاشن" بدل "محاضرات"، ونفس فلو الاكتف سيشن.
+  // A TA works on "sections" instead of "lectures", with the same session flow.
   bool get _isTA =>
       context.read<AuthCubit>().state.user?.isTeachingAssistant ?? false;
 
   String get _term => _isTA ? 'Section' : 'Lecture';
 
-  // معرّف صاحب الجلسة: المعيد بياخد الـ id بتاعه عشان جلساته ما تختلطش
-  // بجلسات الدكتور المشرف، والدكتور بياخد effectiveDoctorId زي ما هو.
   int _ownerId(dynamic user) {
     if (user == null) return 0;
     return user.isTeachingAssistant
@@ -277,7 +248,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         : (user.effectiveDoctorId as int);
   }
 
-  // بنحوّل الـ Section لـ Lecture عشان نفس واجهة العرض/التفعيل تشتغل عليها.
   Lecture _sectionToLecture(Section s) => Lecture(
         id: s.id,
         subjectId: s.subjectId,
@@ -294,7 +264,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         active: true,
       );
 
-  // بنرجّع الـ Lecture/Section المطابق لـ id جاي من السيرفر عند استعادة الجلسة.
   Lecture? _resolveActivatable(int id, dynamic ds, bool isTA) {
     if (isTA) {
       for (final s in ds.allSections) {
@@ -308,7 +277,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     return null;
   }
 
-  // بيجيب صلاحيات المعيد لكل مادة من السيرفر (مزامنة مع الويب سايت)
   Future<void> _loadTaPermissions() async {
     if (!mounted) return;
     final auth = context.read<AuthCubit>().state;
@@ -332,7 +300,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     } catch (_) {}
   }
 
-  // بيطبّق تغيير صلاحية مادة لحظيًا لما السيرفر يبعت إشعار (من غير ريفريش)
   void _applyTaPermissionChange(dynamic payload) {
     if (!mounted) return;
     final user = context.read<AuthCubit>().state.user;
@@ -340,7 +307,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
     if (payload is Map) {
       final taId = payload['taId'];
-      // الإشعار مش بتاع المعيد ده → نتجاهله
       if (taId != null && taId != user.id) return;
 
       final subjectId = payload['subjectId'];
@@ -355,16 +321,13 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         return;
       }
     }
-    // مفيش payload واضح → نجيب الصلاحيات من السيرفر
     _loadTaPermissions();
   }
 
-  // هل المعيد مسموح له يفعّل سيشن للمادة دي؟ (الدكتور دايمًا مسموح)
   bool _canActivateSubject(int subjectId, dynamic user) {
     if (user == null || !(user.isTeachingAssistant as bool)) return true;
     final live = _taSubjectPerms['$subjectId'];
     if (live is Map) return live['ta.session.activate'] != false;
-    // fallback لصلاحيات التوكن لو لسه ما اتجابتش من السيرفر
     return user.canActivateSessionForSubject(subjectId) as bool;
   }
 
@@ -401,7 +364,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             final students =
                 await _getEnrolledStudents(lecture.subjectId, auth.token!);
 
-            // Detect if session is in QR phase (server uses phase='qr' and qrPhaseEndTime)
             final serverPhase = s['phase'] as String?;
             final qrEndTimeStr = s['qrPhaseEndTime'] as String?;
             final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
@@ -421,7 +383,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                   DateTime.tryParse(s['startTime'] ?? s['createdAt'] ?? '') ??
                       DateTime.now();
               _sessionEndTime = isQrPhase ? qrEndTime : null;
-              // Real lecture end = when QR phase began (for report duration).
               _lectureEndedAt = isQrPhase
                   ? (DateTime.tryParse(s['qrPhaseStartTime'] ?? '') ?? qrEndTime)
                   : null;
@@ -487,7 +448,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       final s = sessions.first as Map<String, dynamic>;
       final serverSessionId = s['sessionId'] as String?;
       final serverPhase = s['phase'] as String?;
-      // Server uses phase='qr' and qrPhaseEndTime (not 'qr_mode' / endedAt)
       final qrEndTimeStr = s['qrPhaseEndTime'] as String?;
       final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
       final isQrPhase = serverPhase == 'qr' && qrEndTime != null;
@@ -506,7 +466,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         Duration qrRemaining = _qrDuration;
         if (isQrPhase) {
           final rem = qrEndTime.difference(DateTime.now());
-          if (rem.isNegative) return; // expired — ignore
+          if (rem.isNegative) return;
           qrRemaining = rem;
         }
 
@@ -560,8 +520,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   }
 
   void _resetSession() {
-    // Note: _syncTimer keeps running so the app still picks up a new session
-    // started from the website without needing a manual refresh.
     setState(() {
       _phase = SessionPhase.none;
       _activeSession = null;
@@ -582,12 +540,11 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   // ============================================
   Future<List<Student>> _getEnrolledStudents(
       int subjectId, String token) async {
-    // Check cache first
     if (_enrolledStudentsCache.containsKey(subjectId)) {
       final cacheTime = _cacheTimestamp[subjectId];
       if (cacheTime != null &&
           DateTime.now().difference(cacheTime) < _cacheDuration) {
-        print('📦 Using cached enrolled students for subject $subjectId');
+        logDebug('📦 Using cached enrolled students for subject $subjectId');
         return _enrolledStudentsCache[subjectId]!;
       }
     }
@@ -609,10 +566,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           students = list.map<Student>((j) => Student.fromJson(j)).toList();
         }
 
-        // Store in cache
         _enrolledStudentsCache[subjectId] = students;
         _cacheTimestamp[subjectId] = DateTime.now();
-        print(
+        logDebug(
             '✅ Cached ${students.length} enrolled students for subject $subjectId');
         return students;
       }
@@ -643,7 +599,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     }
 
     try {
-      // ✅ Check enrolled students FIRST — refuse to activate an empty session.
       final students = await _getEnrolledStudents(lecture.subjectId, token);
       if (!mounted) return;
       if (students.isEmpty) {
@@ -658,7 +613,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           'SES-${DateTime.now().millisecondsSinceEpoch}-${lecture.id}';
       final now = DateTime.now();
 
-      // Create session on server
       final res = await http
           .post(
             Uri.parse('${AppConstants.baseUrl}/api/active-sessions'),
@@ -691,7 +645,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         return;
       }
 
-      // ✅ Broadcast to all clients via WebSocket
       final ws = WebSocketService.instance;
       ws.sendMessage({
         'type': 'SESSION_ACTIVATED',
@@ -709,7 +662,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'timestamp': DateTime.now().toIso8601String()
       });
 
-      // Open camera on host
       bool camOk = false;
       try {
         final cr = await http
@@ -767,8 +719,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     if (authState.token == null) return;
 
     try {
-      // Call the correct server endpoint — this sets phase='qr', stores qrPhaseEndTime,
-      // and broadcasts DATA_CHANGE active-session qr-phase-started to ALL clients.
       final res = await http.post(
         Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/begin-qr-phase'),
         headers: _headers(authState.token!),
@@ -785,7 +735,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
         setState(() {
           _phase = SessionPhase.confirming;
-          // ✅ Record the actual end-click moment for the report.
           _lectureEndedAt = DateTime.now();
           _sessionEndTime = qrEndTime ?? DateTime.now();
           _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
@@ -793,9 +742,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         _startConfirmTimer();
         _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
       } else if (res.statusCode == 404) {
-        // The server lost track of this session (e.g. it restarted, or another
-        // device ended it first). Treat it as already ended and just clean up
-        // local state instead of confusing the user with a red "Failed 404".
         setState(() {
           _phase = SessionPhase.none;
           _activeSession = null;
@@ -829,7 +775,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       return;
     }
 
-    // Snapshot session data before we clear state
     final sessionIdSnapshot = _activeSessionId;
     var sessionStudentsSnapshot = List<Student>.from(_sessionStudents ?? []);
     var attendanceSnapshot = List<Map<String, dynamic>>.from(_attendanceRecords);
@@ -837,7 +782,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     Map<String, dynamic>? report;
 
     try {
-      // Delete session → camera closes + removes from server
       final deleteRes = await http
           .delete(
             Uri.parse(
@@ -846,13 +790,13 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           )
           .timeout(const Duration(seconds: 10));
 
-      print('Delete session response: ${deleteRes.statusCode}');
+      logDebug('Delete session response: ${deleteRes.statusCode}');
 
       // ── Already closed elsewhere (website / another device) ───────────
       // That device already saved the report — don't send a duplicate
       // (which, with stale state, comes out empty / "unknown" students).
       if (deleteRes.statusCode == 404) {
-        print('Session already closed elsewhere — skipping duplicate report');
+        logDebug('Session already closed elsewhere — skipping duplicate report');
         _isFinalizing = false;
         if (mounted) {
           _resetSession();
@@ -862,20 +806,14 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         return;
       }
       if (deleteRes.statusCode != 200 && deleteRes.statusCode != 204) {
-        print('⚠️ Session delete returned ${deleteRes.statusCode}: ${deleteRes.body}');
+        logDebug('⚠️ Session delete returned ${deleteRes.statusCode}: ${deleteRes.body}');
       }
 
-      // If the student list wasn't loaded yet (e.g. session was restored from
-      // the website), fetch it now so the report isn't empty.
       if (sessionStudentsSnapshot.isEmpty && _activeSession != null) {
         sessionStudentsSnapshot =
             await _getEnrolledStudents(_activeSession!.subjectId, auth.token!);
       }
 
-      // Pull the freshest attendance records straight from the server before
-      // building the report. This guarantees the report's present/pending
-      // counts match reality even if a confirm/reject happened on the website
-      // and the local poll hadn't synced it yet.
       try {
         final freshRes = await http
             .get(
@@ -894,7 +832,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         }
       } catch (_) {}
 
-      // Build report using snapshots (safe even if state is cleared mid-flight)
       final rptStudents = sessionStudentsSnapshot.map((s) {
             final rec = attendanceSnapshot
                 .cast<Map<String, dynamic>?>()
@@ -905,9 +842,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                         r?['student_id_number'] == s.studentId,
                     orElse: () => null);
 
-            // Face = real camera face-detection only.
             final faceAt = (rec?['face_detected_at'] ?? '').toString();
-            // QR = a real QR scan only — a manual confirmation is NOT a QR.
             final didQr = rec?['confirmedByQR'] == true ||
                 (rec?['qr_scanned_at']?.toString().isNotEmpty ?? false);
             final qrAt = didQr
@@ -925,13 +860,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             }
 
             return {
-              // Every alias both platforms might read, so the report renders
-              // identically on the app and the website.
-              // ⚠️ The id-ish fields carry the STUDENT CODE (not the internal
-              // db id) because the website matches report students against
-              // its enrollment list (approved_subjects) by student code.
-              // Sending the internal id here made the website filter the
-              // report down to 0 enrolled students.
               'student_id': s.studentId,
               'studentId': s.studentId,
               'student_id_number': s.studentId,
@@ -962,19 +890,11 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           : (confirmedSnapshot / rptStudents.length * 100).round();
 
       final nowIso = DateTime.now().toIso8601String();
-      // Real lecture end time = when the user pressed End. Falls back to
-      // the QR phase deadline (`_sessionEndTime`) only if for some reason
-      // the click time wasn't captured.
       final lectureEndDt = _lectureEndedAt ?? _sessionEndTime ?? DateTime.now();
       final lectureEndIso = lectureEndDt.toIso8601String();
       final startDt = _sessionStartTime ?? DateTime.now();
-      // YYYY-MM-DD — universally parseable for the website's DATE column.
       final dateOnly =
           '${startDt.year}-${startDt.month.toString().padLeft(2, '0')}-${startDt.day.toString().padLeft(2, '0')}';
-      // Clean 12-hour clock strings (e.g. "8:05:23 PM") for the website's
-      // TIME column — sent in `startTime`/`endTime` so the website renders a
-      // readable time instead of a raw ISO datetime. ISO copies are kept in
-      // `startTimeIso`/`endTimeIso` for any consumer that needs to parse them.
       final startClock = _clockString(startDt);
       final endClock = _clockString(lectureEndDt);
       report = {
@@ -986,7 +906,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'subject': _activeSession?.subjectName,
         'level': _activeSession?.level,
         'department': _activeSession?.department,
-        // Clean time strings for display columns.
         'startTime': startClock,
         'endTime': endClock,
         'startTimeIso': _sessionStartTime?.toIso8601String(),
@@ -1016,7 +935,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'students': rptStudents,
       };
 
-      // Send report to server
       final reportRes = await http
           .post(
             Uri.parse('${AppConstants.baseUrl}/api/attendance-reports'),
@@ -1025,17 +943,16 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           )
           .timeout(const Duration(seconds: 10));
 
-      print('Report save response: ${reportRes.statusCode}');
+      logDebug('Report save response: ${reportRes.statusCode}');
 
       if (reportRes.statusCode == 200) {
-        // ✅ Broadcast report to all clients
         final ws = WebSocketService.instance;
         ws.sendMessage({
           'type': 'REPORT_SAVED',
           'report': report,
           'timestamp': DateTime.now().toIso8601String()
         });
-        print('📡 Broadcasted REPORT_SAVED');
+        logDebug('📡 Broadcasted REPORT_SAVED');
       }
     } catch (e) {
       debugPrint('Finalize error: $e');
@@ -1057,7 +974,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       });
 
       _snack('Camera closed - Report saved', const Color(0xFF0EA5E9));
-      // Resume background sync so a new session opened anywhere is picked up.
       _startContinuousSync();
     }
   }
@@ -1090,7 +1006,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             )
             .timeout(const Duration(seconds: 5));
 
-        // Session deleted from another device (website final close)
         if (res.statusCode == 404 && mounted && _phase != SessionPhase.none) {
           _snack('Session closed from another device', const Color(0xFF0EA5E9));
           _confirmTimer?.cancel();
@@ -1105,8 +1020,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           final recs =
               (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
-          // Detect QR phase change from website (fallback if WebSocket missed)
-          // Server uses phase='qr' and qrPhaseEndTime (not 'qr_mode' / endedAt)
           final sessionPhase = (data['session']?['phase'] ?? data['phase']) as String?;
           final qrEndTimeStr = (data['session']?['qrPhaseEndTime'] ?? data['qrPhaseEndTime']) as String?;
           final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
@@ -1128,7 +1041,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             _startConfirmTimer();
             _snack('QR mode synced from server', Colors.orange);
           } else if (!_recentLocalEdit) {
-            // Skip overwriting the list right after a local edit.
             setState(() {
               _attendanceRecords = recs;
               _confirmedCount =
@@ -1175,7 +1087,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     }
   }
 
-  // Current record / status of a student from the live records.
   Map<String, dynamic>? _recOf(Student s) =>
       _attendanceRecords.cast<Map<String, dynamic>?>().firstWhere(
             (r) =>
@@ -1187,15 +1098,12 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
   String _statusOf(Student s) => (_recOf(s)?['status'] ?? 'absent').toString();
 
-  // Has the doctor already acted on this student → row shows "Undo".
   bool _isActedOn(Student s) {
     final rec = _recOf(s);
     if (rec == null) return false;
     return rec['status'] == 'confirmed' || rec['rejected'] == true;
   }
 
-  // Builds a record for a student, merging any existing record so camera/QR
-  // data (face time, QR flag, etc.) is preserved.
   Map<String, dynamic> _recordFor(Student s, String status,
       {bool rejected = false}) {
     final existing = _recOf(s);
@@ -1211,11 +1119,9 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     rec['studentName'] = s.name;
     rec['status'] = status;
     rec['confirmed'] = status == 'confirmed';
-    // No comment is attached — confirm/reject is a final action.
     rec.remove('comment');
     if (status == 'confirmed') {
       rec['rejected'] = false;
-      // A real QR scan keeps its method; otherwise this is a Manual confirm.
       rec['method'] = rec['confirmedByQR'] == true ? 'QR' : 'Manual';
       rec['confirmed_at'] = rec['confirmed_at'] ?? now;
       rec['confirmedAt'] = rec['confirmed_at'];
@@ -1251,7 +1157,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   Future<void> _rejectStudent(Student s) =>
       _applyStatus(s, 'absent', rejected: true);
 
-  // Confirm All / Reject All operate ONLY on pending students.
   Future<void> _bulkPending(bool confirm) async {
     final pending = (_sessionStudents ?? [])
         .where((s) => _statusOf(s) == 'pending')
@@ -1280,8 +1185,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   Future<void> _confirmAllPending() => _bulkPending(true);
   Future<void> _rejectAllPending() => _bulkPending(false);
 
-  // True for a few seconds after a local confirm/reject/undo — used so polling
-  // does not overwrite the just-edited list with stale server data.
   bool get _recentLocalEdit =>
       _lastLocalEdit != null &&
       DateTime.now().difference(_lastLocalEdit!) < const Duration(seconds: 3);
@@ -1537,7 +1440,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     final isTA = user?.isTeachingAssistant ?? false;
     final doctorId = _ownerId(user);
 
-    // الدكتور بيشوف المحاضرات — والمعيد بيشوف السكاشن بتاعته
     List<Lecture> doctorLectures;
     if (isTA) {
       final taId = user?.id ?? 0;
@@ -1548,7 +1450,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           .map(_sectionToLecture)
           .toList();
     } else {
-      // جلب المواد الخاصة بالدكتور في الترم الحالي فقط
       final doctorSubjects = dataState.subjects
           .where(
               (s) => s.doctorId == doctorId && s.semester == currentSemester)
@@ -1585,7 +1486,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         backgroundColor: Theme.of(context).cardColor,
         child: Column(
           children: [
-            // Tab bar
             Container(
               margin: EdgeInsets.fromLTRB(20.w, 16.h, 20.w, 12.h),
               padding: EdgeInsets.all(4.r),
@@ -1675,7 +1575,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
 
     return CustomScrollView(
       slivers: [
-        // ✅ Semester info banner
         SliverToBoxAdapter(
           child: Container(
             margin: EdgeInsets.fromLTRB(16.w, 8.h, 16.w, 4.h),
@@ -1705,7 +1604,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             ),
           ),
         ),
-        // Filters (Level only - no semester filter)
         SliverToBoxAdapter(
           child: Container(
             margin: EdgeInsets.symmetric(horizontal: 16.w),
@@ -1873,7 +1771,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           ),
           Builder(builder: (ctx) {
             final user = ctx.watch<AuthCubit>().state.user;
-            // المعيد: لو الدكتور قفل السيشن للمادة دي → زرار الاكتف يتقفل
             if (!_canActivateSubject(lecture.subjectId, user)) {
               return Container(
                 padding:
@@ -2146,7 +2043,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                         : status == 'pending'
                             ? 'Pending'
                             : 'Absent';
-                    // METHOD • TIME subtitle line
                     String subtitle = student.studentId;
                     if (status == 'confirmed') {
                       final m = rec?['confirmedByQR'] == true
@@ -2286,7 +2182,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
                       ]),
                     );
                   }),
-                  // Bulk action buttons — operate on PENDING students only.
                   Container(
                       padding: EdgeInsets.symmetric(
                           horizontal: 12.w, vertical: 10.h),

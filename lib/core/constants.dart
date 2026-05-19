@@ -1,20 +1,16 @@
 class AppConstants {
-  // 🔥 لو بتشغل على موبايل حقيقي غيرها لـ IP بتاع السيرفر
   static const String baseUrl = 'https://192.168.1.37:3443';
 
-  // WebSocket URL (للـ SSE)
   static String get wsUrl {
     return baseUrl
         .replaceFirst('https://', 'wss://')
         .replaceFirst('http://', 'ws://');
   }
 
-  // API Endpoints
   static const String loginEndpoint = '/api/login';
   static const String studentLoginEndpoint = '/api/student/login';
   static const String doctorLoginEndpoint = '/api/doctor/login';
 
-  // Data Endpoints
   static const String studentsEndpoint = '/database/students.json';
   static const String doctorsEndpoint = '/database/doctors.json';
   static const String subjectsEndpoint = '/database/subjects.json';
@@ -26,14 +22,12 @@ class AppConstants {
   static const String attendanceEndpoint = '/api/attendance';
   static const String reportsEndpoint = '/api/attendance-reports';
 
-  // Storage Keys
   static const String tokenKey = 'auth_token';
   static const String userTypeKey = 'user_type';
   static const String userDataKey = 'user_data';
   static const String studentSessionKey = 'student_session';
   static const String doctorSessionKey = 'doctor_session';
 
-  // Days
   static const List<String> days = [
     'Saturday',
     'Sunday',

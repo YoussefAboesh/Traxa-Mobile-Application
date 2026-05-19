@@ -1,4 +1,3 @@
-// lib/screens/sections/student/student_grades.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -10,6 +9,7 @@ import '../../../models/subject.dart';
 import '../../../core/api_service.dart';
 import '../../../core/helpers.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 class StudentGrades extends StatefulWidget {
   const StudentGrades({super.key});
@@ -19,7 +19,7 @@ class StudentGrades extends StatefulWidget {
 }
 
 class _StudentGradesState extends State<StudentGrades> {
-  int _selectedSemester = 0; // 0 = All Semesters, 1 = Semester 1, 2 = Semester 2
+  int _selectedSemester = 0;
   int _selectedLevel = 0;
   final List<int> _levels = [1, 2, 3, 4];
   final Map<String, Map<String, double>> _distributionsCache = {};
@@ -48,7 +48,7 @@ class _StudentGradesState extends State<StudentGrades> {
         await context.read<DataCubit>().loadAllData();
       }
     } catch (e) {
-      print('Error refreshing grades: $e');
+      logDebug('Error refreshing grades: $e');
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
@@ -107,7 +107,6 @@ class _StudentGradesState extends State<StudentGrades> {
           body: Center(child: Text('Student data not found')));
     }
 
-    // أثناء التحميل بنعرض نفس شكل الصفحة كـ Skeleton.
     final bool showSkeleton =
         dataState.loadingState.isLoading || realStudent == null;
     final student = realStudent ??
@@ -426,7 +425,6 @@ class _StudentGradesState extends State<StudentGrades> {
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 14.sp)),
                         SizedBox(height: 4.h),
-                        // ✅ السيميستر تحت و wrap text
                         Wrap(
                           spacing: 6.w,
                           runSpacing: 4.h,

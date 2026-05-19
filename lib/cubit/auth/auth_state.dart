@@ -7,14 +7,14 @@ class AuthState extends Equatable {
   final String? token;
   final bool isAuthenticated;
   final LoadingState loadingState;
-  
+
   const AuthState({
     this.user,
     this.token,
     this.isAuthenticated = false,
     this.loadingState = const LoadingState(),
   });
-  
+
   AuthState copyWith({
     User? user,
     String? token,
@@ -28,10 +28,10 @@ class AuthState extends Equatable {
       loadingState: loadingState ?? this.loadingState,
     );
   }
-  
+
   @override
   List<Object?> get props => [user, token, isAuthenticated, loadingState];
-  
+
   factory AuthState.initial() => const AuthState();
   factory AuthState.loading() => AuthState(
     loadingState: LoadingState.loading(),

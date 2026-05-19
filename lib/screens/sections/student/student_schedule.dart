@@ -1,4 +1,3 @@
-// lib/screens/sections/student/student_schedule.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -12,6 +11,7 @@ import '../../../models/teaching_assistant.dart';
 import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 class StudentSchedule extends StatefulWidget {
   const StudentSchedule({super.key});
@@ -21,7 +21,6 @@ class StudentSchedule extends StatefulWidget {
 }
 
 class _StudentScheduleState extends State<StudentSchedule> {
-  // Tabs: 0=Subjects, 1=Lectures, 2=Sections
   int _selectedTab = 0;
   String _searchQuery = '';
   String _selectedDay = '';
@@ -40,34 +39,29 @@ class _StudentScheduleState extends State<StudentSchedule> {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
     try {
-      // loadAllData يحمّل المعيدين كمان، فاسم المعيد بيتحل فوراً.
       await context.read<DataCubit>().loadAllData();
     } catch (e) {
-      print('Error refreshing schedule: $e');
+      logDebug('Error refreshing schedule: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
   }
 
-  /// يحلّ اسم المعيد للسكشن فوراً من البيانات المحمّلة (من غير أي API call).
   String _resolveSectionTAName(
     Section section,
     List<TeachingAssistant> tas,
     List<Subject> subjects,
   ) {
-    // 1) الاسم جاي مع السكشن نفسه
     final fromSection = section.taName.trim();
     if (fromSection.isNotEmpty && fromSection.toLowerCase() != 'ta') {
       return fromSection;
     }
-    // 2) من قائمة المعيدين عن طريق ta_id
     if (section.taId != null) {
       final m = tas.where((t) => t.id == section.taId).toList();
       if (m.isNotEmpty && m.first.name.trim().isNotEmpty) {
         return m.first.name;
       }
     }
-    // 3) من المعيد المربوط بالمادة
     final subj = subjects.where((s) => s.id == section.subjectId).toList();
     if (subj.isNotEmpty) {
       final tn = subj.first.taName?.trim();
@@ -135,8 +129,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
       int currentSemester) {
     if (student == null) return [];
 
-    // Sections don't carry a semester field, so resolve it from the
-    // linked subject and only keep sections of the current semester.
     final Map<int, int> semesterBySubject = {
       for (final s in allSubjects) s.id: s.semester
     };
@@ -147,7 +139,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
         return false;
       }
       final subjectSemester = semesterBySubject[s.subjectId];
-      // If the subject is known, enforce the current semester.
       if (subjectSemester != null && subjectSemester != currentSemester) {
         return false;
       }
@@ -188,7 +179,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
           body: Center(child: Text('Student data not found')));
     }
 
-    // أثناء التحميل بنعرض نفس شكل الصفحة كـ Skeleton.
     final bool showSkeleton =
         dataState.loadingState.isLoading || realStudent == null;
     final student = realStudent ??
@@ -241,7 +231,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            // Tab Bar
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.fromLTRB(20.w, 16.h, 20.w, 12.h),
@@ -264,13 +253,11 @@ class _StudentScheduleState extends State<StudentSchedule> {
               ),
             ),
 
-            // Filters
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20.w),
                 child: Column(
                   children: [
-                    // Semester banner
                     Container(
                       padding: EdgeInsets.symmetric(
                           horizontal: 12.w, vertical: 8.h),
@@ -298,7 +285,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                       ),
                     ),
                     SizedBox(height: 12.h),
-                    // Search
                     TextField(
                       onChanged: (v) => setState(() => _searchQuery = v),
                       style: TextStyle(
@@ -331,7 +317,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                       ),
                     ),
                     SizedBox(height: 12.h),
-                    // Day filter (for lectures & sections)
                     if (_selectedTab == 1 || _selectedTab == 2)
                       Row(
                         children: [
@@ -379,7 +364,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
               ),
             ),
 
-            // Content
             if (_selectedTab == 0)
               _buildSubjectsContent(
                   semester1Subjects, semester2Subjects, isDark)
@@ -486,7 +470,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Card Header
           Container(
             padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 14.h),
             decoration: BoxDecoration(
@@ -549,7 +532,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
             ),
           ),
 
-          // Table Header
           Container(
             padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
             decoration: BoxDecoration(
@@ -621,7 +603,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
             ),
           ),
 
-          // Subjects Rows
           Column(
             children: subjects.asMap().entries.map((entry) {
               final index = entry.key;
@@ -647,7 +628,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Code Column
                     SizedBox(
                       width: 50.w,
                       child: Text(
@@ -662,7 +642,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                         softWrap: true,
                       ),
                     ),
-                    // Subject Column
                     Expanded(
                       flex: 1,
                       child: Padding(
@@ -679,7 +658,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                         ),
                       ),
                     ),
-                    // Doctor Column
                     Expanded(
                       flex: 1,
                       child: Padding(
@@ -696,7 +674,6 @@ class _StudentScheduleState extends State<StudentSchedule> {
                         ),
                       ),
                     ),
-                    // Hours Column
                     SizedBox(
                       width: 45.w,
                       child: Center(

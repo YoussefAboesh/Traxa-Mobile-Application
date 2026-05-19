@@ -1,4 +1,3 @@
-// lib/screens/sections/student/student_profile.dart
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:convert';
@@ -18,6 +17,7 @@ import '../../../core/api_service.dart';
 import '../../../core/constants.dart';
 import '../../../core/helpers.dart';
 import '../../../services/websocket_service.dart';
+import '../../../core/logger.dart';
 
 class StudentProfile extends StatefulWidget {
   const StudentProfile({super.key});
@@ -27,7 +27,6 @@ class StudentProfile extends StatefulWidget {
 }
 
 class _StudentProfileState extends State<StudentProfile> {
-  // Change Password
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -37,41 +36,32 @@ class _StudentProfileState extends State<StudentProfile> {
   bool _obscureNew = true;
   bool _obscureConfirm = true;
 
-  // QR Code
   bool _showQRCode = false;
   String? _qrCodeData;
   bool _isLoadingQR = false;
 
-  // Profile Image (من السيرفر، مع كاش)
   final ImagePicker _imagePicker = ImagePicker();
 
-  // Refresh
   bool _isRefreshing = false;
 
-  /// رقم الطالب (student_id) — من الـ user أو من قائمة الطلاب كـ fallback.
   String? get _studentId {
     final user = context.read<AuthCubit>().state.user;
     if (user == null) return null;
     if (user.username.trim().isNotEmpty) return user.username.trim();
-    // fallback لو الجلسة قديمة والـ username فاضي
     final students = context.read<DataCubit>().state.students;
     final s = findStudentSafely(
         userId: user.id, username: user.username, students: students);
     return s?.studentId;
   }
 
-  /// نسخة الصورة — بتتغيّر مع كل فتح للصفحة/رفع/حذف، فالكاش بيتجدّد
-  /// أوتوماتيك (cache-busting) من غير ما الصورة القديمة تفضل عالقة.
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
 
-  /// رابط صورة الطالب على السيرفر (مع نسخة عشان المزامنة مع الويب).
   String? get _avatarUrl {
     final id = _studentId;
     if (id == null || id.isEmpty) return null;
     return '${AppConstants.baseUrl}/api/student/avatar/$id?v=$_avatarVersion';
   }
 
-  /// يجدّد نسخة الصورة → CachedNetworkImage يجيب أحدث صورة من السيرفر.
   void _bumpAvatar() {
     if (mounted) {
       setState(() => _avatarVersion = DateTime.now().millisecondsSinceEpoch);
@@ -97,10 +87,9 @@ class _StudentProfileState extends State<StudentProfile> {
 
     try {
       await context.read<DataCubit>().loadAllData();
-      // مزامنة مع الويب: نجدّد نسخة الصورة فبتتجاب من السيرفر من جديد.
       _bumpAvatar();
     } catch (e) {
-      print('Error refreshing profile: $e');
+      logDebug('Error refreshing profile: $e');
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
@@ -236,7 +225,6 @@ class _StudentProfileState extends State<StudentProfile> {
 
       ToastMessage.showInfo(context, 'Uploading...');
 
-      // نوع الصورة لازم يتبعت صريح — من غيره السيرفر بيرفض الملف ويرجّع 500
       final lower = pickedFile.path.toLowerCase();
       String ext = 'jpg', subtype = 'jpeg';
       if (lower.endsWith('.png')) {
@@ -270,7 +258,6 @@ class _StudentProfileState extends State<StudentProfile> {
         final data = jsonDecode(responseBody);
 
         if (data['success'] == true) {
-          // نجدّد النسخة عشان الصورة الجديدة تظهر فوراً.
           final url = _avatarUrl;
           if (url != null) await ProfileAvatar.evict(url);
           _bumpAvatar();
@@ -313,7 +300,6 @@ class _StudentProfileState extends State<StudentProfile> {
 
     try {
       final url = _avatarUrl;
-      // حذف مضمون: السيرفر بيمسح الملف فعلياً (حتى لو الصورة محطوطة من الويب).
       final ok = await ApiService.forceRemoveAvatar(
         kind: 'student',
         id: studentId,
@@ -479,7 +465,7 @@ class _StudentProfileState extends State<StudentProfile> {
       final data = jsonDecode(response.body);
       return data['success'] == true;
     } catch (e) {
-      print('Error verifying password: $e');
+      logDebug('Error verifying password: $e');
       return false;
     }
   }

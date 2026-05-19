@@ -1,4 +1,3 @@
-// lib/screens/sections/student/student_overview.dart
 // ignore_for_file: use_build_context_synchronously, unused_local_variable
 
 import 'package:flutter/material.dart';
@@ -16,6 +15,7 @@ import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
 import '../../../models/grade.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 class StudentOverview extends StatefulWidget {
   const StudentOverview({super.key});
@@ -34,7 +34,6 @@ class _StudentOverviewState extends State<StudentOverview> {
     _loadCurrentSemester();
   }
 
-  /// يحلّ اسم المعيد للسكشن فوراً من البيانات المحمّلة (من غير أي API call).
   String _sectionTAName(
     Section section,
     List<TeachingAssistant> tas,
@@ -67,7 +66,6 @@ class _StudentOverviewState extends State<StudentOverview> {
     }
   }
 
-  /// حساب GPA التراكمي من أول مستوى 1 لحد مستوى وسيمستر معين
   double _calculateCumulativeGPAUpTo(List<Grade> allVisibleGrades, List<Subject> allSubjects, int upToLevel, int upToSemester) {
     List<Grade> cumulativeGrades = [];
 
@@ -154,7 +152,7 @@ class _StudentOverviewState extends State<StudentOverview> {
       }
       await _loadCurrentSemester();
     } catch (e) {
-      print('Error refreshing: $e');
+      logDebug('Error refreshing: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
@@ -169,7 +167,6 @@ class _StudentOverviewState extends State<StudentOverview> {
     return 'Needs Improvement';
   }
 
-  /// صفوف وهمية تُعرض كـ Skeleton أثناء تحميل بيانات الطالب.
   List<Lecture> _placeholderLectures() {
     return List.generate(
       2,
@@ -206,14 +203,12 @@ class _StudentOverviewState extends State<StudentOverview> {
           )
         : null;
 
-    // الطالب مش موجود والبيانات اتحمّلت فعلاً → رسالة فقط.
     if (realStudent == null && dataState.loadingState.isLoaded) {
       return const Scaffold(
         body: Center(child: Text('Student data not found')),
       );
     }
 
-    // أثناء التحميل بنعرض نفس شكل الصفحة بالظبط كـ Skeleton (مش شكل عام).
     final bool showSkeleton =
         dataState.loadingState.isLoading || realStudent == null;
     final student = realStudent ??
@@ -250,10 +245,8 @@ class _StudentOverviewState extends State<StudentOverview> {
     final todaysSections =
         studentSections.where((s) => s.day == todayName).toList();
 
-    // Combine lectures and sections for today
     final todaySchedule = <dynamic>[...todaysLectures, ...todaysSections];
     todaySchedule.sort((a, b) => a.timeDisplay.compareTo(b.timeDisplay));
-    // أثناء التحميل بنحط صفوف وهمية عشان الـ Skeleton يبان زي شكل الصفحة.
     if (showSkeleton && todaySchedule.isEmpty) {
       todaySchedule.addAll(_placeholderLectures());
     }
@@ -363,7 +356,6 @@ class _StudentOverviewState extends State<StudentOverview> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            // Hero Header
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 0),
@@ -469,7 +461,6 @@ class _StudentOverviewState extends State<StudentOverview> {
 
             SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-            // GPA Cards Row
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16.w),
@@ -507,7 +498,6 @@ class _StudentOverviewState extends State<StudentOverview> {
 
             SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-            // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.symmetric(horizontal: 16.w),
@@ -626,7 +616,6 @@ class _StudentOverviewState extends State<StudentOverview> {
     );
   }
 
-  // GPA Card Widget
   Widget _buildGpaCard(
     BuildContext context, {
     required double gpa,

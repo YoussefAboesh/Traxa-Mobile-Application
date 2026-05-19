@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_skeleton.dart';
 
-/// مؤشّر التحميل — تم تحديثه ليستخدم نظام الـ Skeleton الحديث بدلاً من
-/// شكل الدائرة التقليدي (CircularProgressIndicator).
 class LoadingIndicator extends StatelessWidget {
   final String? message;
   final int itemCount;

@@ -1,4 +1,3 @@
-// lib/screens/sections/doctor/doctor_profile.dart
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:convert';
@@ -20,6 +19,7 @@ import '../../../widgets/toast_message.dart';
 import '../../../widgets/profile_avatar.dart';
 import '../../../widgets/app_skeleton.dart';
 import 'doctor_ta_management.dart';
+import '../../../core/logger.dart';
 
 class DoctorProfile extends StatefulWidget {
   const DoctorProfile({super.key});
@@ -32,18 +32,14 @@ class _DoctorProfileState extends State<DoctorProfile> {
   bool _isRefreshing = false;
   final ImagePicker _imagePicker = ImagePicker();
 
-  /// نسخة الصورة — بتتغيّر مع كل رفع/حذف/تحديث (cache-busting).
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
 
-  /// رابط صورة الدكتور/المعيد على السيرفر (مع نسخة للمزامنة مع الويب).
-  /// بنستخدم `user.id` (نفس الـ id للدكتور والمعيد) عشان مايحصلش تداخل.
   String? get _avatarUrl {
     final user = context.read<AuthCubit>().state.user;
     if (user == null) return null;
     return '${AppConstants.baseUrl}/api/doctor/avatar/${user.id}?v=$_avatarVersion';
   }
 
-  /// يجدّد نسخة الصورة → CachedNetworkImage يجيب أحدث صورة من السيرفر.
   void _bumpAvatar() {
     if (mounted) {
       setState(() => _avatarVersion = DateTime.now().millisecondsSinceEpoch);
@@ -61,10 +57,9 @@ class _DoctorProfileState extends State<DoctorProfile> {
     try {
       await context.read<AuthCubit>().refreshUserData();
       await context.read<DataCubit>().loadAllData();
-      // مزامنة مع الويب: نجدّد نسخة الصورة فبتتجاب من السيرفر من جديد.
       _bumpAvatar();
     } catch (e) {
-      print('Error refreshing profile: $e');
+      logDebug('Error refreshing profile: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
@@ -190,7 +185,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
       ToastMessage.showInfo(context, 'Uploading...');
 
-      // نوع الصورة لازم يتبعت صريح — من غيره السيرفر بيرفض الملف ويرجّع 500
       final lower = pickedFile.path.toLowerCase();
       String ext = 'jpg', subtype = 'jpeg';
       if (lower.endsWith('.png')) {
@@ -262,7 +256,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
     try {
       final url = _avatarUrl;
-      // حذف مضمون: السيرفر بيمسح الملف فعلياً (حتى لو الصورة محطوطة من الويب).
       final ok = await ApiService.forceRemoveAvatar(
         kind: 'doctor',
         id: doctorId,
@@ -298,7 +291,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
     final isTA = user.isTeachingAssistant;
     final doctorId = user.effectiveDoctorId;
 
-    // Get doctor/TA details from dataState
     Doctor? doctor;
     TeachingAssistant? teachingAssistant;
 
@@ -349,7 +341,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
               constraints: BoxConstraints(maxWidth: 600.w),
               child: Column(
                 children: [
-                  // Profile Card
                   Container(
                     padding: EdgeInsets.all(24.r),
                     decoration: BoxDecoration(
@@ -372,7 +363,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     ),
                     child: Column(
                       children: [
-                        // Avatar with edit button
                         GestureDetector(
                           onTap: _showImageOptions,
                           child: Stack(
@@ -500,7 +490,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
                   SizedBox(height: 20.h),
 
-                  // Username Card (Full Width)
                   _buildInfoCard(
                     icon: Icons.person_outline,
                     title: 'USERNAME',
@@ -511,7 +500,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
                   SizedBox(height: 12.h),
 
-                  // Email Card (Full Width)
                   _buildInfoCard(
                     icon: Icons.email_outlined,
                     title: 'EMAIL ADDRESS',
@@ -522,7 +510,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
                   SizedBox(height: 12.h),
 
-                  // ID Number and Member Since in Row
                   Row(
                     children: [
                       Expanded(
@@ -560,7 +547,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
 
                   SizedBox(height: 20.h),
 
-                  // TA Management (Doctors only)
                   if (!isTA) ...[
                     _buildActionTile(
                       icon: Icons.shield_outlined,
@@ -577,7 +563,6 @@ class _DoctorProfileState extends State<DoctorProfile> {
                     SizedBox(height: 12.h),
                   ],
 
-                  // Logout button
                   _buildLogoutButton(isDark),
 
                   SizedBox(height: 80.h),

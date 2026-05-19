@@ -1,4 +1,3 @@
-// lib/core/theme.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -75,7 +74,7 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14.r),
         ),
-        padding: EdgeInsets.symmetric(vertical: 16.h),
+        padding: EdgeInsets.symmetric(vertical: 14.h, horizontal: 28.w),
       ),
     ),
     textTheme: TextTheme(
@@ -149,7 +148,7 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14.r),
         ),
-        padding: EdgeInsets.symmetric(vertical: 16.h),
+        padding: EdgeInsets.symmetric(vertical: 14.h, horizontal: 28.w),
       ),
     ),
     textTheme: TextTheme(
@@ -175,17 +174,16 @@ class AppTheme {
   );
 }
 
-// ✅ Extension للحصول على isDarkMode بسهولة في أي widget
 extension ThemeContextExtension on BuildContext {
   bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
-  
+
   Color get adaptiveCardColor => isDarkMode ? AppTheme.darkCard : AppTheme.lightCard;
-  
+
   Color get adaptiveTextPrimary => isDarkMode ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-  
+
   Color get adaptiveTextSecondary => isDarkMode ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-  
+
   Color get adaptiveHintColor => isDarkMode ? AppTheme.darkTextHint : AppTheme.lightTextHint;
-  
+
   Color get adaptiveBackground => isDarkMode ? AppTheme.darkBackground : AppTheme.lightBackground;
 }

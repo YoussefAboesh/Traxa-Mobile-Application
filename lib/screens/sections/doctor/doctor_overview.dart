@@ -1,4 +1,3 @@
-// lib/screens/sections/doctor/doctor_overview.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -8,6 +7,7 @@ import '../../../cubit/data/data_cubit.dart';
 import '../../../core/helpers.dart';
 import '../../../core/theme.dart';
 import '../../../widgets/app_skeleton.dart';
+import '../../../core/logger.dart';
 
 class DoctorOverview extends StatefulWidget {
   const DoctorOverview({super.key});
@@ -25,7 +25,7 @@ class _DoctorOverviewState extends State<DoctorOverview> {
     try {
       await context.read<DataCubit>().loadAllData();
     } catch (e) {
-      print('Error refreshing doctor data: $e');
+      logDebug('Error refreshing doctor data: $e');
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
@@ -48,7 +48,6 @@ class _DoctorOverviewState extends State<DoctorOverview> {
     final todaysLectures =
         doctorLectures.where((l) => l.day == todayName).toList();
 
-    // Formatted date
     final now = DateTime.now();
     final dayNames = [
       'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
@@ -70,7 +69,6 @@ class _DoctorOverviewState extends State<DoctorOverview> {
         backgroundColor: Theme.of(context).cardColor,
         child: CustomScrollView(
           slivers: [
-            // Hero Header
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.fromLTRB(16.w, 16.h, 16.w, 0),
@@ -162,7 +160,6 @@ class _DoctorOverviewState extends State<DoctorOverview> {
 
             SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-            // Today's Schedule
             SliverToBoxAdapter(
               child: Container(
                 margin: EdgeInsets.symmetric(horizontal: 16.w),
@@ -252,7 +249,6 @@ class _DoctorOverviewState extends State<DoctorOverview> {
               ),
             ),
 
-            // Expanded spacer to fill empty space
             const SliverFillRemaining(
               hasScrollBody: false,
               fillOverscroll: true,

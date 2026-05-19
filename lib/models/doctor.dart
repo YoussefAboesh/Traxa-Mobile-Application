@@ -1,5 +1,3 @@
-// lib/models/doctor.dart
-// ✅ Fix: شيلنا password — مش المفروض الـ app يخزن passwords
 class Doctor {
   final int id;
   final String name;

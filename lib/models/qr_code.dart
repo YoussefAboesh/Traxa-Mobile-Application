@@ -1,6 +1,3 @@
-// lib/models/qr_code.dart
-// ✅ Fix: اسم الكلاس QrCode بدل QRcode (Dart convention)
-
 class QrCode {
   final int id;
   final int studentId;

@@ -1,4 +1,3 @@
-// lib/cubit/auth/auth_cubit.dart
 import 'dart:convert';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +7,7 @@ import '../../models/user.dart';
 import '../../services/websocket_service.dart';
 import '../../services/secure_storage_service.dart';
 import 'auth_state.dart';
+import '../../core/logger.dart';
 
 class AuthCubit extends Cubit<AuthState> {
   AuthCubit() : super(AuthState.initial()) {
@@ -16,7 +16,6 @@ class AuthCubit extends Cubit<AuthState> {
 
   Future<void> checkAuth() async {
     try {
-      // Load token and user data from secure storage (encrypted)
       final token = await SecureStorageService.getToken();
       final userDataJson = await SecureStorageService.getUserData();
 
@@ -27,7 +26,7 @@ class AuthCubit extends Cubit<AuthState> {
           ApiService.setToken(token);
           emit(AuthState.success(user, token));
           await WebSocketService.instance.connect();
-          print('✅ Session restored from secure storage');
+          logDebug('✅ Session restored from secure storage');
         } catch (e) {
           emit(AuthState.error('Failed to restore session'));
         }
@@ -35,7 +34,7 @@ class AuthCubit extends Cubit<AuthState> {
         emit(AuthState.initial());
       }
     } catch (e) {
-      print('❌ Error checking auth: $e');
+      logDebug('❌ Error checking auth: $e');
       emit(AuthState.initial());
     }
   }
@@ -57,13 +56,9 @@ class AuthCubit extends Cubit<AuthState> {
         final Map<String, dynamic> userJson =
             Map<String, dynamic>.from(response[isStudent ? 'student' : 'user']);
 
-        // Preserve role/userType from the server (e.g. 'teaching-assistant');
-        // only fall back to a default if the server omitted them.
         if (isStudent) {
           userJson['role'] = 'student';
           userJson['userType'] = 'student';
-          // السيرفر بيرجّع student_id مش username — نخليه الـ username
-          // عشان رابط صورة البروفايل وباقي البحث يشتغلوا صح.
           userJson['username'] ??= userJson['student_id']?.toString();
         } else {
           userJson['role'] ??= 'doctor';
@@ -72,11 +67,8 @@ class AuthCubit extends Cubit<AuthState> {
 
         final user = User.fromJson(userJson);
 
-        // The token is already persisted in secure storage by ApiService
-        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
-        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(AppConstants.userTypeKey,
             user.userType ?? (isStudent ? 'student' : 'doctor'));
@@ -110,16 +102,12 @@ class AuthCubit extends Cubit<AuthState> {
 
         studentJson['role'] = 'student';
         studentJson['userType'] = 'student';
-        // السيرفر بيرجّع student_id مش username — نخليه الـ username.
         studentJson['username'] ??= studentJson['student_id']?.toString();
 
         final user = User.fromJson(studentJson);
 
-        // The token is already persisted in secure storage by ApiService
-        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
-        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(AppConstants.userTypeKey, 'student');
 
@@ -150,11 +138,8 @@ class AuthCubit extends Cubit<AuthState> {
 
         final user = User.fromJson(userJson);
 
-        // The token is already persisted in secure storage by ApiService
-        // during the login request; only the user data is saved here.
         await SecureStorageService.saveUserData(jsonEncode(user.toJson()));
 
-        // Also save user type in SharedPreferences for non-sensitive use
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(AppConstants.userTypeKey, 'doctor');
 
@@ -169,9 +154,6 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
-  /// Replaces the cached user's permissions in-place. Used when a WebSocket
-  /// event tells us the supervising doctor changed this TA's permissions —
-  /// every widget reading `authState.user.permissions` will rebuild.
   Future<void> updateUserPermissions(Map<String, dynamic> newPerms) async {
     final user = state.user;
     final token = state.token;
@@ -190,18 +172,15 @@ class AuthCubit extends Cubit<AuthState> {
       permissions: Map<String, dynamic>.from(newPerms),
     );
 
-    // Save to secure storage (encrypted)
     await SecureStorageService.saveUserData(jsonEncode(updated.toJson()));
 
     emit(AuthState.success(updated, token));
-    print('🔄 User permissions updated in AuthCubit');
+    logDebug('🔄 User permissions updated in AuthCubit');
   }
 
   Future<void> logout() async {
-    // Clear from secure storage
     await SecureStorageService.clearAll();
 
-    // Clear from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(AppConstants.userTypeKey);
 
@@ -210,17 +189,13 @@ class AuthCubit extends Cubit<AuthState> {
     emit(AuthState.loggedOut());
   }
 
-  // ✅ دالة لتحديث بيانات المستخدم من السيرفر
   Future<void> refreshUserData() async {
     if (state.user == null || state.token == null) return;
 
-    print('🔄 Refreshing user data from server...');
+    logDebug('🔄 Refreshing user data from server...');
 
-    // 🚫 Never re-resolve TAs against students.json — their numeric id can
-    // collide with a real student id and silently flip the session into a
-    // student session. Just keep the in-memory user as-is.
     if (state.user!.isTeachingAssistant) {
-      print('ℹ️ Skipping refresh for teaching-assistant — keeping cached user');
+      logDebug('ℹ️ Skipping refresh for teaching-assistant — keeping cached user');
       return;
     }
 
@@ -270,16 +245,15 @@ class AuthCubit extends Cubit<AuthState> {
       if (freshUserData != null) {
         final updatedUser = User.fromJson(freshUserData);
 
-        // Save to secure storage (encrypted)
         await SecureStorageService.saveUserData(
             jsonEncode(updatedUser.toJson()));
 
         emit(AuthState.success(updatedUser, token));
 
-        print('✅ User data refreshed successfully');
+        logDebug('✅ User data refreshed successfully');
       }
     } catch (e) {
-      print('❌ Error refreshing user data: $e');
+      logDebug('❌ Error refreshing user data: $e');
     }
   }
 }

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(flutter analyze *)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(xargs wc -l)",
+      "Bash(python strip_comments.py)"
     ]
   }
 }

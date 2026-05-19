@@ -1,4 +1,3 @@
-// lib/screens/doctor_screen.dart
 // ignore_for_file: duplicate_ignore, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
@@ -13,6 +12,8 @@ import 'sections/doctor/doctor_subjects.dart';
 import 'sections/doctor/doctor_attendance.dart';
 import 'sections/doctor/doctor_reports.dart';
 import 'sections/doctor/doctor_profile.dart';
+import '../widgets/error_widget.dart';
+import '../core/logger.dart';
 
 class DoctorScreen extends StatefulWidget {
   const DoctorScreen({super.key});
@@ -63,7 +64,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
   Future<void> _loadFreshDataOnStart() async {
     try {
-      print('🔄 Loading fresh data on app start...');
+      logDebug('🔄 Loading fresh data on app start...');
       await context.read<DataCubit>().fullReload();
       final updatedState = context.read<DataCubit>().state;
       if (mounted) {
@@ -72,9 +73,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
           _localSemester = updatedState.currentSemester;
         });
       }
-      print('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
+      logDebug('📅 Loaded: Year=$_localAcademicYear, Semester=$_localSemester');
     } catch (e) {
-      print('❌ Error loading fresh data: $e');
+      logDebug('❌ Error loading fresh data: $e');
     }
   }
 
@@ -83,7 +84,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
     setState(() => _isReloading = true);
 
     try {
-      print('🔄 DoctorScreen: Full reload started...');
+      logDebug('🔄 DoctorScreen: Full reload started...');
       final savedYear = _localAcademicYear;
 
       await context.read<AuthCubit>().refreshUserData();
@@ -99,7 +100,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
         _localSemester = dataState.currentSemester;
       });
 
-      print('✅ DoctorScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
+      logDebug('✅ DoctorScreen: Full reload completed, Year: $_localAcademicYear, Semester: $_localSemester');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -119,7 +120,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
         );
       }
     } catch (e) {
-      print('❌ Full reload error: $e');
+      logDebug('❌ Full reload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -144,19 +145,36 @@ class _DoctorScreenState extends State<DoctorScreen> {
     }
   }
 
+  bool _sessionExpiredHandled = false;
+
+  void _handleSessionExpired() {
+    if (!mounted || _sessionExpiredHandled) return;
+    _sessionExpiredHandled = true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Session expired. Please login again.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+      ),
+    );
+    context.read<DataCubit>().clearData();
+    context.read<AuthCubit>().logout();
+  }
+
   void _setupWebSocketListeners() {
     final ws = WebSocketService.instance;
 
     ws.semesterStream.listen((semester) async {
       if (!mounted) return;
-      print('📢 WebSocket - Semester changed to: S$semester');
+      logDebug('📢 WebSocket - Semester changed to: S$semester');
       setState(() => _localSemester = semester);
       await _fullReload();
     });
 
     ws.academicYearStream.listen((year) async {
       if (!mounted) return;
-      print('📢 WebSocket - Academic year changed to: $year');
+      logDebug('📢 WebSocket - Academic year changed to: $year');
       setState(() {
         _pendingAcademicYear = year;
         _localAcademicYear = year;
@@ -165,9 +183,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
       setState(() => _pendingAcademicYear = '');
     });
 
-    // Session activated/ended: the Attendance screen handles its own syncing
-    // and user-facing messages, so no global snackbar here (it used to show
-    // a confusing "Session activated: Unknown").
     ws.sessionActivatedStream.listen((data) {
       if (!mounted) return;
       if (_selectedIndex == 2) {
@@ -204,7 +219,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
     ws.levelsPromotedStream.listen((data) async {
       if (!mounted) return;
-      print('📢 Levels promoted - Auto reloading...');
+      logDebug('📢 Levels promoted - Auto reloading...');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Levels promoted - Reloading data...'),
@@ -249,10 +264,14 @@ class _DoctorScreenState extends State<DoctorScreen> {
     ws.dataChangeStream.listen((data) {
       if (!mounted) return;
       final type = data['type'] as String?;
+      if (type == 'TOKEN_EXPIRED') {
+        _handleSessionExpired();
+        return;
+      }
       if (type == 'DATA_CHANGE') {
         final entity = data['entity'] as String?;
         final action = data['action'] as String?;
-        print('📱 DoctorScreen: Data change - $entity / $action');
+        logDebug('📱 DoctorScreen: Data change - $entity / $action');
 
         if (entity == 'subject' || entity == 'lecture') {
           if (_selectedIndex == 0 || _selectedIndex == 1) {
@@ -260,7 +279,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
           }
         }
       } else if (type == 'FULL_SYNC') {
-        print('📱 Full sync received - Auto reloading...');
+        logDebug('📱 Full sync received - Auto reloading...');
         _fullReload();
       }
     });
@@ -270,7 +289,14 @@ class _DoctorScreenState extends State<DoctorScreen> {
   Widget build(BuildContext context) {
     final authState = context.watch<AuthCubit>().state;
     final doctor = authState.user;
+    final dataState = context.watch<DataCubit>().state;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (dataState.loadingState.hasError &&
+        (dataState.loadingState.errorMessage ?? '').contains('Session expired')) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _handleSessionExpired());
+    }
 
     if (doctor == null) {
       return const Scaffold(
@@ -327,8 +353,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            // الريفريش بقى بيظهر Skeleton جوّه الصفحة بدل الدايرة التقليدية،
-            // فالزرار بيفضل أيقونة بس بتبهت شوية أثناء التحميل.
             icon: Icon(
               Icons.refresh_rounded,
               color: Theme.of(context).primaryColor.withValues(
@@ -368,6 +392,15 @@ class _DoctorScreenState extends State<DoctorScreen> {
         ],
       ),
       body: () {
+        if (dataState.loadingState.hasError &&
+            dataState.students.isEmpty &&
+            dataState.subjects.isEmpty) {
+          return CustomErrorWidget(
+            message:
+                dataState.loadingState.errorMessage ?? 'Failed to load data',
+            onRetry: _isReloading ? null : _fullReload,
+          );
+        }
         final tabs = _visibleTabs(doctor);
         if (tabs.isEmpty) {
           return Center(

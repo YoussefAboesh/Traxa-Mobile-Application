@@ -4,9 +4,9 @@ class ErrorHandler {
   static String getErrorMessage(dynamic error) {
     if (error is String) return error;
     if (error is Exception) return error.toString().replaceAll('Exception: ', '');
-    
+
     final errorStr = error.toString();
-    
+
     if (errorStr.contains('SocketException')) {
       return 'No internet connection. Please check your network.';
     }
@@ -25,10 +25,10 @@ class ErrorHandler {
     if (errorStr.contains('timeout')) {
       return 'Request timeout. Please check your connection.';
     }
-    
+
     return 'An unexpected error occurred. Please try again.';
   }
-  
+
   static void showErrorSnackBar(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -42,7 +42,7 @@ class ErrorHandler {
       ),
     );
   }
-  
+
   static void showSuccessSnackBar(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

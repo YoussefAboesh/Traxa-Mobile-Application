@@ -1,4 +1,3 @@
-// lib/cubit/data/data_cubit.dart
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/api_service.dart';
@@ -25,8 +24,6 @@ class DataCubit extends Cubit<DataState> {
   int get currentSemester => _currentSemester;
   String get currentAcademicYear => _currentAcademicYear;
 
-  // Lightweight debug logger — stripped out of release builds so that no
-  // data ever ends up in production logs.
   void _log(String message) {
     if (kDebugMode) debugPrint(message);
   }
@@ -71,16 +68,14 @@ class DataCubit extends Cubit<DataState> {
       if (json is Map<String, dynamic>) {
         try {
           sections.add(Section.fromJson(json));
-        } catch (e) {
-          // silent
+        } catch (_) {
+          // skip malformed section
         }
       }
     }
     return sections;
   }
 
-  // Builds the loaded state from raw json lists (used by both the live
-  // fetch path and the offline-cache fallback).
   void _emitLoaded({
     required List<dynamic> rawStudents,
     required List<dynamic> rawDoctors,
@@ -122,8 +117,6 @@ class DataCubit extends Cubit<DataState> {
     ));
   }
 
-  // Offline fallback: rebuilds state from the last cached snapshot.
-  // Returns true when a usable cache was found.
   Future<bool> _emitFromCache() async {
     try {
       final cached = await CacheService.loadAllData(ignoreExpiry: true);
@@ -169,7 +162,6 @@ class DataCubit extends Cubit<DataState> {
         rawTAs: results[5],
       );
 
-      // Persist a snapshot so the app still works when offline.
       await CacheService.saveAllData(
         students: results[0],
         doctors: results[1],
@@ -179,8 +171,6 @@ class DataCubit extends Cubit<DataState> {
     } catch (e) {
       _log('❌ $errorPrefix: $e');
 
-      // Network failed — try to show the last cached snapshot instead of
-      // leaving the user with an empty error screen (basic offline mode).
       final usedCache = await _emitFromCache();
       if (usedCache) return;
 

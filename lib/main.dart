@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -16,11 +15,6 @@ import 'screens/doctor_screen.dart';
 import 'screens/student_screen.dart';
 
 class MyHttpOverrides extends HttpOverrides {
-  // The Traxa server runs on the local network with a self-signed
-  // certificate, so its cert must be accepted. To avoid being exposed to
-  // man-in-the-middle attacks elsewhere, we ONLY trust a self-signed cert
-  // for the configured server host — every other host is still verified
-  // normally.
   static final String _trustedHost = Uri.parse(AppConstants.baseUrl).host;
 
   @override
@@ -39,7 +33,6 @@ void main() async {
 
   HttpOverrides.global = MyHttpOverrides();
 
-  // Initialize WebSocket connection
   await WebSocketService.instance.connect();
 
   runApp(const MyApp());
@@ -68,11 +61,6 @@ class MyApp extends StatelessWidget {
               themeMode: themeState.themeMode,
               theme: AppTheme.lightTheme,
               darkTheme: AppTheme.darkTheme,
-              // Clamp the device's font-scale setting so an unusually large
-              // system text size can't overflow/break layouts on any phone.
-              // A manual TextScaler.linear clamp is used instead of
-              // MediaQuery.withClampedTextScaling, which can assert-crash on
-              // some devices' scalers.
               builder: (context, widget) {
                 final mq = MediaQuery.of(context);
                 final estimated = mq.textScaler.scale(100) / 100;
@@ -93,9 +81,6 @@ class MyApp extends StatelessWidget {
                 context.read<DataCubit>().fullReload();
               },
               builder: (context, authState) {
-                // مفيش شاشة تحميل كاملة بعد كده — الشاشة بتفضل ثابتة
-                // والـ Skeleton بيشتغل جوّاها أثناء تحميل/تحديث البيانات،
-                // فالريفريش مايرجعش المستخدم لصفحة الـ Home.
                 if (authState.isAuthenticated && authState.user != null) {
                   if (authState.user!.isDoctor ||
                       authState.user!.isTeachingAssistant) {

@@ -1,4 +1,3 @@
-// lib/models/grade.dart
 import 'package:flutter/material.dart';
 
 class Grade {
@@ -88,7 +87,6 @@ class Grade {
     };
   }
 
-  // ✅ حسب الجدول من الصورة بالضبط
   String get gradeLetter {
     final pct = total;
     if (pct >= 96) return 'A+';
@@ -106,7 +104,6 @@ class Grade {
     return 'F';
   }
 
-  // ✅ حسب الجدول من الصورة بالضبط
   double get gradePoints {
     final pct = total;
     if (pct >= 96) return 4.0;
@@ -124,7 +121,7 @@ class Grade {
     return 0.0;
   }
 
-  bool get isPassed => total >= 50; // النجاح من 50% حسب الجدول (D-)
+  bool get isPassed => total >= 50;
 
   Color get gradeColor {
     final pct = total;

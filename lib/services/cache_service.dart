@@ -1,4 +1,3 @@
-// lib/services/cache_service.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,12 +25,6 @@ class CacheService {
     if (kDebugMode) debugPrint('💾 Data cached successfully');
   }
 
-  /// Loads the cached snapshot.
-  ///
-  /// When [ignoreExpiry] is false (default) a snapshot older than
-  /// [_cacheMaxAge] is treated as stale and `null` is returned. Pass
-  /// `ignoreExpiry: true` for the offline fallback, where showing stale
-  /// data is better than showing nothing.
   static Future<Map<String, List<dynamic>>?> loadAllData(
       {bool ignoreExpiry = false}) async {
     final prefs = await SharedPreferences.getInstance();
