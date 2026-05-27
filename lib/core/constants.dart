@@ -1,5 +1,5 @@
 class AppConstants {
-  static const String baseUrl = 'https://192.168.1.37:3443';
+  static const String baseUrl = 'https://traxa-system.online';
 
   static String get wsUrl {
     return baseUrl
