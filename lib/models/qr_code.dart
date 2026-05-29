@@ -14,7 +14,7 @@ class QrCode {
   final DateTime? lastScannedAt;
   final int version;
 
-  QrCode({
+  const QrCode({
     required this.id,
     required this.studentId,
     required this.studentName,
@@ -30,6 +30,82 @@ class QrCode {
     this.lastScannedAt,
     required this.version,
   });
+
+  QrCode copyWith({
+    int? id,
+    int? studentId,
+    String? studentName,
+    String? studentCode,
+    int? studentLevel,
+    String? studentDepartment,
+    String? qrData,
+    String? encodedData,
+    DateTime? generatedAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    int? scanCount,
+    DateTime? lastScannedAt,
+    int? version,
+  }) {
+    return QrCode(
+      id: id ?? this.id,
+      studentId: studentId ?? this.studentId,
+      studentName: studentName ?? this.studentName,
+      studentCode: studentCode ?? this.studentCode,
+      studentLevel: studentLevel ?? this.studentLevel,
+      studentDepartment: studentDepartment ?? this.studentDepartment,
+      qrData: qrData ?? this.qrData,
+      encodedData: encodedData ?? this.encodedData,
+      generatedAt: generatedAt ?? this.generatedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      scanCount: scanCount ?? this.scanCount,
+      lastScannedAt: lastScannedAt ?? this.lastScannedAt,
+      version: version ?? this.version,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QrCode &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          studentId == other.studentId &&
+          studentName == other.studentName &&
+          studentCode == other.studentCode &&
+          studentLevel == other.studentLevel &&
+          studentDepartment == other.studentDepartment &&
+          qrData == other.qrData &&
+          encodedData == other.encodedData &&
+          generatedAt == other.generatedAt &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          scanCount == other.scanCount &&
+          lastScannedAt == other.lastScannedAt &&
+          version == other.version;
+
+  @override
+  int get hashCode => Object.hashAll([
+        id,
+        studentId,
+        studentName,
+        studentCode,
+        studentLevel,
+        studentDepartment,
+        qrData,
+        encodedData,
+        generatedAt,
+        createdAt,
+        updatedAt,
+        scanCount,
+        lastScannedAt,
+        version,
+      ]);
+
+  @override
+  String toString() =>
+      'QrCode(studentId: $studentId, code: $studentCode, scans: $scanCount)';
 
   factory QrCode.fromJson(Map<String, dynamic> json) {
     return QrCode(

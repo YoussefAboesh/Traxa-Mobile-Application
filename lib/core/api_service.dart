@@ -62,6 +62,23 @@ class ApiService {
 
   // ================= LOGIN =================
 
+  /// Safely parse a JSON response body. If the body isn't JSON (typical when
+  /// the server is down and Cloudflare/Nginx returns an HTML error page like
+  /// "Error 1033"), surface a friendly server-unreachable message instead of
+  /// the raw FormatException.
+  static Map<String, dynamic> _decodeOrServerDown(http.Response response) {
+    final body = response.body.trimLeft();
+    final looksLikeJson = body.startsWith('{') || body.startsWith('[');
+    if (!looksLikeJson) {
+      throw const FormatException(
+        'Server is unreachable. Please check your internet connection or try again later.',
+      );
+    }
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return {'data': decoded};
+  }
+
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
       final response = await http.post(
@@ -69,15 +86,17 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'password': password}),
       );
-      final data = jsonDecode(response.body);
+      final data = _decodeOrServerDown(response);
       if (response.statusCode == 200) {
         await setToken(data['token']);
         return {'success': true, 'token': data['token'], 'user': data['user']};
       } else {
-        return {'success': false, 'error': data['error']};
+        return {'success': false, 'error': data['error'] ?? 'Login failed (${response.statusCode})'};
       }
+    } on FormatException catch (e) {
+      return {'success': false, 'error': e.message};
     } catch (e) {
-      return {'success': false, 'error': e.toString()};
+      return {'success': false, 'error': 'Server is unreachable. Please try again later.'};
     }
   }
 
@@ -88,15 +107,17 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': studentId, 'password': password, 'isFirstLogin': isFirstLogin}),
       );
-      final data = jsonDecode(response.body);
+      final data = _decodeOrServerDown(response);
       if (response.statusCode == 200) {
         await setToken(data['token']);
         return {'success': true, 'token': data['token'], 'student': data['student']};
       } else {
-        return {'success': false, 'error': data['error']};
+        return {'success': false, 'error': data['error'] ?? 'Login failed (${response.statusCode})'};
       }
+    } on FormatException catch (e) {
+      return {'success': false, 'error': e.message};
     } catch (e) {
-      return {'success': false, 'error': e.toString()};
+      return {'success': false, 'error': 'Server is unreachable. Please try again later.'};
     }
   }
 
@@ -107,15 +128,17 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'password': password}),
       );
-      final data = jsonDecode(response.body);
+      final data = _decodeOrServerDown(response);
       if (response.statusCode == 200) {
         await setToken(data['token']);
         return {'success': true, 'token': data['token'], 'user': data['user']};
       } else {
-        return {'success': false, 'error': data['error']};
+        return {'success': false, 'error': data['error'] ?? 'Login failed (${response.statusCode})'};
       }
+    } on FormatException catch (e) {
+      return {'success': false, 'error': e.message};
     } catch (e) {
-      return {'success': false, 'error': e.toString()};
+      return {'success': false, 'error': 'Server is unreachable. Please try again later.'};
     }
   }
 

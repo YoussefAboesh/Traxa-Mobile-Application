@@ -1,39 +1,40 @@
+// Backwards-compat facade. New code should import from the topic-specific
+// files directly (api_endpoints / storage_keys / app_strings / env).
+import 'env/app_env.dart';
+import 'constants/api_endpoints.dart';
+import 'constants/storage_keys.dart';
+import 'constants/app_strings.dart';
+
+export 'constants/api_endpoints.dart';
+export 'constants/storage_keys.dart';
+export 'constants/app_strings.dart';
+
+@Deprecated('Use AppEnv.baseUrl / ApiEndpoints.* / StorageKeys.* / AppStrings.* instead')
 class AppConstants {
-  static const String baseUrl = 'https://traxa-system.online';
+  AppConstants._();
 
-  static String get wsUrl {
-    return baseUrl
-        .replaceFirst('https://', 'wss://')
-        .replaceFirst('http://', 'ws://');
-  }
+  static String get baseUrl => AppEnv.baseUrl;
+  static String get wsUrl => AppEnv.wsUrl;
 
-  static const String loginEndpoint = '/api/login';
-  static const String studentLoginEndpoint = '/api/student/login';
-  static const String doctorLoginEndpoint = '/api/doctor/login';
+  static String get loginEndpoint => ApiEndpoints.login;
+  static String get studentLoginEndpoint => ApiEndpoints.studentLogin;
+  static String get doctorLoginEndpoint => ApiEndpoints.doctorLogin;
 
-  static const String studentsEndpoint = '/database/students.json';
-  static const String doctorsEndpoint = '/database/doctors.json';
-  static const String subjectsEndpoint = '/database/subjects.json';
-  static const String lecturesEndpoint = '/database/lectures.json';
-  static const String locationsEndpoint = '/database/locations.json';
-  static const String timeslotsEndpoint = '/database/timeslots.json';
+  static String get studentsEndpoint => ApiEndpoints.studentsDb;
+  static String get doctorsEndpoint => ApiEndpoints.doctorsDb;
+  static String get subjectsEndpoint => ApiEndpoints.subjectsDb;
+  static String get lecturesEndpoint => ApiEndpoints.lecturesDb;
+  static String get locationsEndpoint => ApiEndpoints.locationsDb;
+  static String get timeslotsEndpoint => ApiEndpoints.timeslotsDb;
+  static String get gradesEndpoint => ApiEndpoints.gradesByStudent;
+  static String get attendanceEndpoint => ApiEndpoints.attendance;
+  static String get reportsEndpoint => ApiEndpoints.attendanceReports;
 
-  static const String gradesEndpoint = '/api/grades/student';
-  static const String attendanceEndpoint = '/api/attendance';
-  static const String reportsEndpoint = '/api/attendance-reports';
+  static String get tokenKey => StorageKeys.legacyAuthToken;
+  static String get userTypeKey => StorageKeys.userType;
+  static String get userDataKey => StorageKeys.userData;
+  static String get studentSessionKey => StorageKeys.studentSession;
+  static String get doctorSessionKey => StorageKeys.doctorSession;
 
-  static const String tokenKey = 'auth_token';
-  static const String userTypeKey = 'user_type';
-  static const String userDataKey = 'user_data';
-  static const String studentSessionKey = 'student_session';
-  static const String doctorSessionKey = 'doctor_session';
-
-  static const List<String> days = [
-    'Saturday',
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday'
-  ];
+  static List<String> get days => AppStrings.days;
 }

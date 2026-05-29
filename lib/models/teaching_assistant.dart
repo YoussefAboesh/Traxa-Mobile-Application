@@ -1,3 +1,5 @@
+import 'package:collection/collection.dart';
+
 class TeachingAssistant {
   final int id;
   final String name;
@@ -7,7 +9,7 @@ class TeachingAssistant {
   final Map<String, dynamic>? permissions;
   final List<int> assignedSubjectIds;
 
-  TeachingAssistant({
+  const TeachingAssistant({
     required this.id,
     required this.name,
     required this.username,
@@ -30,20 +32,38 @@ class TeachingAssistant {
           : null,
       assignedSubjectIds: json['assigned_subject_ids'] != null
           ? List<int>.from(json['assigned_subject_ids'])
-          : [],
+          : const [],
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'username': username,
-      'email': email,
-      'supervisor_doctor_id': supervisorDoctorId,
-      'permissions': permissions,
-      'assigned_subject_ids': assignedSubjectIds,
-    };
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'username': username,
+        'email': email,
+        'supervisor_doctor_id': supervisorDoctorId,
+        'permissions': permissions,
+        'assigned_subject_ids': assignedSubjectIds,
+      };
+
+  TeachingAssistant copyWith({
+    int? id,
+    String? name,
+    String? username,
+    String? email,
+    int? supervisorDoctorId,
+    Map<String, dynamic>? permissions,
+    List<int>? assignedSubjectIds,
+  }) {
+    return TeachingAssistant(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      username: username ?? this.username,
+      email: email ?? this.email,
+      supervisorDoctorId: supervisorDoctorId ?? this.supervisorDoctorId,
+      permissions: permissions ?? this.permissions,
+      assignedSubjectIds: assignedSubjectIds ?? this.assignedSubjectIds,
+    );
   }
 
   bool get hasPermissions => permissions != null && permissions!.isNotEmpty;
@@ -54,4 +74,33 @@ class TeachingAssistant {
   }
 
   bool get isAssignedToSubject => assignedSubjectIds.isNotEmpty;
+
+  static const _deepEq = DeepCollectionEquality();
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TeachingAssistant &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          username == other.username &&
+          email == other.email &&
+          supervisorDoctorId == other.supervisorDoctorId &&
+          _deepEq.equals(permissions, other.permissions) &&
+          _deepEq.equals(assignedSubjectIds, other.assignedSubjectIds);
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        name,
+        username,
+        email,
+        supervisorDoctorId,
+        _deepEq.hash(permissions),
+        _deepEq.hash(assignedSubjectIds),
+      );
+
+  @override
+  String toString() => 'TA(id: $id, username: $username, name: $name)';
 }

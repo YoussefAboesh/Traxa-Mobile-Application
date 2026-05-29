@@ -231,9 +231,17 @@ class _StudentOverviewState extends State<StudentOverview> {
         .where((g) => g.studentId == student.id && g.isVisible)
         .toList();
 
-    final currentSemesterGrades = allVisibleGrades
-        .where((g) => g.level == currentLevel && g.semester == semester)
-        .toList();
+    // Trust the joined Subject's level rather than grade.level — some older
+    // grade rows on the server have a stale/missing level that defaults to 1
+    // and would otherwise drop subjects out of the current semester count.
+    // If the subject isn't in allSubjects (deleted/not loaded yet), fall back
+    // to grade.level so we don't silently drop a graded row.
+    final currentSemesterGrades = allVisibleGrades.where((g) {
+      if (g.semester != semester) return false;
+      final subject = allSubjects.where((s) => s.id == g.subjectId).firstOrNull;
+      final effectiveLevel = subject?.level ?? g.level;
+      return effectiveLevel == currentLevel;
+    }).toList();
 
     final studentSubjects = dataState.getSubjectsForStudent(student);
     final studentLectures = dataState.getLecturesForStudent(student);
@@ -339,8 +347,19 @@ class _StudentOverviewState extends State<StudentOverview> {
     final cumulativeTrendStatus = _getTrendStatus(currentCumulativeGPA, previousCumulativeGPA);
     final cumulativeLabel = getGradeLabel(currentCumulativeGPA);
 
-    final semesterCredits =
-        studentSubjects.fold<int>(0, (sum, s) => sum + (s.totalCreditHours));
+    // Match the web's Semester GPA card: count one entry per graded subject
+    // this semester, with that subject's credit hours. Driving this off the
+    // grades list (not studentSubjects) means a graded row still counts even
+    // if its Subject record wasn't loaded into allSubjects.
+    final gradedSubjectIds =
+        currentSemesterGrades.map((g) => g.subjectId).toSet();
+    final semesterSubjectCount = gradedSubjectIds.length;
+    final semesterCredits = gradedSubjectIds.fold<int>(0, (sum, subjectId) {
+      final subject =
+          allSubjects.where((s) => s.id == subjectId).firstOrNull;
+      // Default to 3 (university default) when the subject isn't in cache.
+      return sum + (subject?.totalCreditHours ?? 3);
+    });
     final totalCredits = allVisibleGrades.fold<int>(0, (sum, g) {
       final subject = allSubjects.where((s) => s.id == g.subjectId).firstOrNull;
       return sum + (subject?.totalCreditHours ?? 0);
@@ -472,7 +491,7 @@ class _StudentOverviewState extends State<StudentOverview> {
                         gpa: semesterGPA,
                         label: semesterLabel,
                         credits: semesterCredits,
-                        subjects: studentSubjects.length,
+                        subjects: semesterSubjectCount,
                         trendStatus: semesterTrendStatus,
                         color: const Color(0xFF8B5CF6),
                         isDark: isDark,

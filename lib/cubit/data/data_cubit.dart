@@ -1,22 +1,52 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/api_service.dart';
-import '../../services/cache_service.dart';
-import '../../models/student.dart';
+import '../../core/di/service_locator.dart';
+import '../../core/logger.dart';
+import '../../models/attendance.dart';
 import '../../models/doctor.dart';
-import '../../models/subject.dart';
+import '../../models/grade.dart';
 import '../../models/lecture.dart';
 import '../../models/section.dart';
-import '../../models/grade.dart';
-import '../../models/attendance.dart';
+import '../../models/student.dart';
+import '../../models/subject.dart';
 import '../../models/teaching_assistant.dart';
+import '../../repositories/attendance_repository.dart';
+import '../../repositories/doctor_repository.dart';
+import '../../repositories/grades_repository.dart';
+import '../../repositories/student_repository.dart';
+import '../../repositories/system_repository.dart';
+import '../../repositories/ta_repository.dart';
+import '../../services/cache_service.dart';
 import '../shared/loading_state.dart';
 import 'data_state.dart';
 
 class DataCubit extends Cubit<DataState> {
-  DataCubit() : super(DataState.initial()) {
-    loadSystemData();
-  }
+  DataCubit({
+    SystemRepository? systemRepo,
+    StudentRepository? studentRepo,
+    DoctorRepository? doctorRepo,
+    GradesRepository? gradesRepo,
+    AttendanceRepository? attendanceRepo,
+    TaRepository? taRepo,
+  })  : _system = systemRepo ?? getIt<SystemRepository>(),
+        _studentRepo = studentRepo ?? getIt<StudentRepository>(),
+        _doctorRepo = doctorRepo ?? getIt<DoctorRepository>(),
+        _gradesRepo = gradesRepo ?? getIt<GradesRepository>(),
+        _attendanceRepo = attendanceRepo ?? getIt<AttendanceRepository>(),
+        _taRepo = taRepo ?? getIt<TaRepository>(),
+        super(DataState.initial());
+
+  final SystemRepository _system;
+  final StudentRepository _studentRepo;
+  final DoctorRepository _doctorRepo;
+  final GradesRepository _gradesRepo;
+  final AttendanceRepository _attendanceRepo;
+  final TaRepository _taRepo;
+
+  static const _tag = 'DataCubit';
+
+  /// Bootstrap entry point — called by the service locator.
+  Future<void> init() => loadSystemData();
 
   int _currentSemester = 1;
   String _currentAcademicYear = '2026-2027';
@@ -24,42 +54,38 @@ class DataCubit extends Cubit<DataState> {
   int get currentSemester => _currentSemester;
   String get currentAcademicYear => _currentAcademicYear;
 
-  void _log(String message) {
-    if (kDebugMode) debugPrint(message);
-  }
-
   Future<void> loadSystemData() async {
-    try {
-      await loadCurrentSemester();
-      await loadCurrentAcademicYear();
-      if (_currentSemester != state.currentSemester ||
-          _currentAcademicYear != state.currentAcademicYear) {
-        emit(state.copyWith(
-          currentSemester: _currentSemester,
-          currentAcademicYear: _currentAcademicYear,
-        ));
-      }
-    } catch (e) {
-      _log('❌ Error loading system data: $e');
+    await loadCurrentSemester();
+    await loadCurrentAcademicYear();
+    if (_currentSemester != state.currentSemester ||
+        _currentAcademicYear != state.currentAcademicYear) {
+      emit(state.copyWith(
+        currentSemester: _currentSemester,
+        currentAcademicYear: _currentAcademicYear,
+      ));
     }
   }
 
   Future<void> loadCurrentSemester() async {
-    try {
-      _currentSemester = await ApiService.getCurrentSemester();
-    } catch (e) {
-      _log('❌ Error loading semester: $e');
-      _currentSemester = 1;
-    }
+    final result = await _system.getCurrentSemester();
+    result.when(
+      success: (s) => _currentSemester = s,
+      failure: (e) {
+        AppLogger.w('Error loading semester', tag: _tag, error: e);
+        _currentSemester = 1;
+      },
+    );
   }
 
   Future<void> loadCurrentAcademicYear() async {
-    try {
-      _currentAcademicYear = await ApiService.getCurrentAcademicYear();
-    } catch (e) {
-      _log('❌ Error loading academic year: $e');
-      _currentAcademicYear = '2026-2027';
-    }
+    final result = await _system.getCurrentAcademicYear();
+    result.when(
+      success: (y) => _currentAcademicYear = y,
+      failure: (e) {
+        AppLogger.w('Error loading academic year', tag: _tag, error: e);
+        _currentAcademicYear = '2026-2027';
+      },
+    );
   }
 
   List<Section> _extractSections(List<dynamic> rawSections) {
@@ -69,7 +95,7 @@ class DataCubit extends Cubit<DataState> {
         try {
           sections.add(Section.fromJson(json));
         } catch (_) {
-          // skip malformed section
+          // Server occasionally returns rows missing required fields — skip them.
         }
       }
     }
@@ -97,7 +123,7 @@ class DataCubit extends Cubit<DataState> {
     final filteredLectures = allLectures.where((l) {
       final subject = allSubjects.firstWhere(
         (s) => s.id == l.subjectId,
-        orElse: () => Subject(
+        orElse: () => const Subject(
             id: 0, name: '', doctorId: 0, doctorName: '', level: 1, semester: 1),
       );
       return subject.semester == _currentSemester;
@@ -129,10 +155,10 @@ class DataCubit extends Cubit<DataState> {
         rawSections: const [],
         rawTAs: const [],
       );
-      _log('📦 Loaded data from offline cache');
+      AppLogger.i('Loaded data from offline cache', tag: _tag);
       return true;
     } catch (e) {
-      _log('❌ Error loading from cache: $e');
+      AppLogger.w('Error loading from cache', tag: _tag, error: e);
       return false;
     }
   }
@@ -140,48 +166,62 @@ class DataCubit extends Cubit<DataState> {
   Future<void> _fetchAndEmit({required String errorPrefix}) async {
     emit(state.copyWith(loadingState: LoadingState.loading()));
 
-    try {
-      await loadCurrentSemester();
-      await loadCurrentAcademicYear();
+    await loadCurrentSemester();
+    await loadCurrentAcademicYear();
 
-      final results = await Future.wait([
-        ApiService.getStudents(),
-        ApiService.getDoctors(),
-        ApiService.getSubjects(),
-        ApiService.getLectures(),
-        ApiService.getSections(),
-        ApiService.getTeachingAssistants(),
-      ]);
+    final results = await Future.wait([
+      _studentRepo.getAllStudents(),
+      _doctorRepo.getAllDoctors(),
+      _doctorRepo.getSubjects(),
+      _doctorRepo.getLectures(),
+      _system.getSections(),
+      _taRepo.getAll(),
+    ]);
 
-      _emitLoaded(
-        rawStudents: results[0],
-        rawDoctors: results[1],
-        rawSubjects: results[2],
-        rawLectures: results[3],
-        rawSections: results[4],
-        rawTAs: results[5],
-      );
+    final anyFailed = results.any((r) => r.isFailure);
+    if (anyFailed) {
+      final firstFailure = results.firstWhere((r) => r.isFailure);
+      final err = firstFailure.exceptionOrNull;
+      AppLogger.w('$errorPrefix: ${err?.message}', tag: _tag);
 
-      await CacheService.saveAllData(
-        students: results[0],
-        doctors: results[1],
-        subjects: results[2],
-        lectures: results[3],
-      );
-    } catch (e) {
-      _log('❌ $errorPrefix: $e');
-
+      // Only fall back to error state if cache is also empty — keeps the
+      // user on the last-known-good data when offline.
       final usedCache = await _emitFromCache();
       if (usedCache) return;
 
-      if (e.toString().contains('401') ||
-          e.toString().contains('Unauthorized')) {
+      final msg = err?.message ?? '';
+      if (msg.toLowerCase().contains('unauthorized') ||
+          msg.toLowerCase().contains('session expired')) {
         emit(DataState.error('Session expired. Please login again.'));
       } else {
         emit(DataState.error(
             'No internet connection and no offline data available.'));
       }
+      return;
     }
+
+    final students = results[0].valueOrNull ?? const [];
+    final doctors = results[1].valueOrNull ?? const [];
+    final subjects = results[2].valueOrNull ?? const [];
+    final lectures = results[3].valueOrNull ?? const [];
+    final sections = results[4].valueOrNull ?? const [];
+    final tas = results[5].valueOrNull ?? const [];
+
+    _emitLoaded(
+      rawStudents: students,
+      rawDoctors: doctors,
+      rawSubjects: subjects,
+      rawLectures: lectures,
+      rawSections: sections,
+      rawTAs: tas,
+    );
+
+    await CacheService.saveAllData(
+      students: students,
+      doctors: doctors,
+      subjects: subjects,
+      lectures: lectures,
+    );
   }
 
   Future<void> loadAllData() async {
@@ -190,6 +230,8 @@ class DataCubit extends Cubit<DataState> {
   }
 
   Future<void> fullReload() async {
+    // Still reads the in-memory token from the legacy static facade; a
+    // future pass will swap this for TokenHolder injected via GetIt.
     final token = ApiService.getToken();
     if (token == null || token.isEmpty) {
       emit(DataState.error('Session expired. Please login again.'));
@@ -198,95 +240,88 @@ class DataCubit extends Cubit<DataState> {
     await _fetchAndEmit(errorPrefix: 'Full reload error');
   }
 
-  // ── Grades ────────────────────────────────────────────────────────────────
-
   Future<void> loadStudentGrades(int studentId) async {
-    try {
-      final response = await ApiService.getStudentGrades(studentId);
-      final allGrades = response.map((j) => Grade.fromJson(j)).toList();
-      emit(state.copyWith(allGrades: allGrades));
-    } catch (e) {
-      _log('❌ Error loading grades: $e');
-    }
+    final result = await _gradesRepo.getStudentGrades(studentId);
+    result.when(
+      success: (raw) {
+        final grades = raw.map((j) => Grade.fromJson(j)).toList();
+        emit(state.copyWith(allGrades: grades));
+      },
+      failure: (e) => AppLogger.w('Error loading grades', tag: _tag, error: e),
+    );
   }
 
   Future<void> loadStudentGradesWithToken(int studentId, String token) async {
-    try {
-      final response =
-          await ApiService.getStudentGradesWithToken(studentId, token);
-      final allGrades = response.map((j) => Grade.fromJson(j)).toList();
-      emit(state.copyWith(allGrades: allGrades));
-    } catch (e) {
-      _log('❌ Error loading grades: $e');
-    }
+    final result = await _gradesRepo.getStudentGradesWithToken(studentId, token);
+    result.when(
+      success: (raw) {
+        final grades = raw.map((j) => Grade.fromJson(j)).toList();
+        emit(state.copyWith(allGrades: grades));
+      },
+      failure: (e) => AppLogger.w('Error loading grades', tag: _tag, error: e),
+    );
   }
 
-  List<Grade> getGradesForSemester(int semester) {
-    return state.allGrades.where((g) => g.semester == semester).toList();
-  }
+  List<Grade> getGradesForSemester(int semester) =>
+      state.allGrades.where((g) => g.semester == semester).toList();
 
   Future<void> checkGradesStatus(int studentId, String token) async {
-    try {
-      await ApiService.checkGradesStatus(studentId, token);
-    } catch (e) {
-      _log('❌ Error checking grades status: $e');
-    }
+    final result = await _gradesRepo.checkStatus(studentId, token);
+    result.when(
+      success: (_) {},
+      failure: (e) => AppLogger.w('Error checking grades status', tag: _tag, error: e),
+    );
   }
 
-  // ── Attendance ────────────────────────────────────────────────────────────
-
   Future<void> loadAttendance(String? token) async {
-    try {
-      final response = await ApiService.getAttendance(token);
-      final attendance =
-          response.map((j) => AttendanceRecord.fromJson(j)).toList();
-      emit(state.copyWith(attendance: attendance));
-    } catch (e) {
-      _log('❌ Error loading attendance: $e');
-    }
+    final result = await _attendanceRepo.getAll(token: token);
+    result.when(
+      success: (raw) {
+        final records = raw.map((j) => AttendanceRecord.fromJson(j)).toList();
+        emit(state.copyWith(attendance: records));
+      },
+      failure: (e) =>
+          AppLogger.w('Error loading attendance', tag: _tag, error: e),
+    );
   }
 
   void clearData() {
     emit(DataState.initial());
   }
 
-  // ── Teaching Assistants ───────────────────────────────────────────────────
-
   Future<void> fetchTAsForDoctor(int doctorId) async {
-    try {
-      final response = await ApiService.getTeachingAssistantsForDoctor(doctorId);
-      final tas = response.map((j) => TeachingAssistant.fromJson(j)).toList();
-      emit(state.copyWith(teachingAssistants: tas));
-    } catch (e) {
-      _log('❌ Error loading TAs: $e');
-    }
+    final result = await _taRepo.getForDoctor(doctorId);
+    result.when(
+      success: (raw) {
+        final tas = raw.map((j) => TeachingAssistant.fromJson(j)).toList();
+        emit(state.copyWith(teachingAssistants: tas));
+      },
+      failure: (e) => AppLogger.w('Error loading TAs', tag: _tag, error: e),
+    );
   }
 
   Future<Map<String, dynamic>> fetchTAPermissions(int taId) async {
-    return await ApiService.getTAPermissions(taId);
+    final result = await _taRepo.getPermissions(taId);
+    return result.valueOrNull ?? <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>> updateTAPermissions(
-      int taId, Map<String, dynamic> permissions) async {
-    final result = await ApiService.updateTAPermissions(taId, permissions);
-    if (result['success'] == true) {
+    int taId,
+    Map<String, dynamic> permissions,
+  ) async {
+    final result = await _taRepo.updatePermissions(taId, permissions);
+    final asMap = result.valueOrNull;
+
+    if (asMap != null) {
       final updated = state.teachingAssistants.map((ta) {
-        if (ta.id == taId) {
-          return TeachingAssistant(
-            id: ta.id,
-            name: ta.name,
-            username: ta.username,
-            email: ta.email,
-            supervisorDoctorId: ta.supervisorDoctorId,
-            permissions: permissions,
-            assignedSubjectIds: ta.assignedSubjectIds,
-          );
-        }
+        if (ta.id == taId) return ta.copyWith(permissions: permissions);
         return ta;
       }).toList();
       emit(state.copyWith(teachingAssistants: updated));
+      return {'success': true, ...asMap};
     }
-    return result;
+    final err = result.exceptionOrNull;
+    return {'success': false, 'error': err?.message ?? 'Failed'};
   }
 
   Future<void> refreshForNewSemester() async {
@@ -295,7 +330,7 @@ class DataCubit extends Cubit<DataState> {
   }
 
   void updateGrade(Grade updatedGrade) {
-    final List<Grade> newGrades = List.from(state.allGrades);
+    final newGrades = List<Grade>.from(state.allGrades);
     final index = newGrades.indexWhere((g) => g.id == updatedGrade.id);
     if (index != -1) {
       newGrades[index] = updatedGrade;

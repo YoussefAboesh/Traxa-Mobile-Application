@@ -9,11 +9,10 @@ class Subject {
   final String? department;
   final int? credits;
   final int? creditHours;
-  // ── TA fields (from the subjects endpoint or joined) ──────────────────
   final int? taId;
   final String? taName;
 
-  Subject({
+  const Subject({
     required this.id,
     this.code,
     required this.name,
@@ -28,6 +27,7 @@ class Subject {
     this.taName,
   });
 
+  /// Falls back to 3 — the university default and the server default.
   int get totalCreditHours {
     if (credits != null && credits! > 0) return credits!;
     if (creditHours != null && creditHours! > 0) return creditHours!;
@@ -54,20 +54,86 @@ class Subject {
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'code': code,
-      'name': name,
-      'doctor_id': doctorId,
-      'doctor_name': doctorName,
-      'level': level,
-      'semester': semester,
-      'department': department,
-      'credits': credits,
-      'credit_hours': creditHours,
-      'ta_id': taId,
-      'ta_name': taName,
-    };
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'code': code,
+        'name': name,
+        'doctor_id': doctorId,
+        'doctor_name': doctorName,
+        'level': level,
+        'semester': semester,
+        'department': department,
+        'credits': credits,
+        'credit_hours': creditHours,
+        'ta_id': taId,
+        'ta_name': taName,
+      };
+
+  Subject copyWith({
+    int? id,
+    String? code,
+    String? name,
+    int? doctorId,
+    String? doctorName,
+    int? level,
+    int? semester,
+    String? department,
+    int? credits,
+    int? creditHours,
+    int? taId,
+    String? taName,
+  }) {
+    return Subject(
+      id: id ?? this.id,
+      code: code ?? this.code,
+      name: name ?? this.name,
+      doctorId: doctorId ?? this.doctorId,
+      doctorName: doctorName ?? this.doctorName,
+      level: level ?? this.level,
+      semester: semester ?? this.semester,
+      department: department ?? this.department,
+      credits: credits ?? this.credits,
+      creditHours: creditHours ?? this.creditHours,
+      taId: taId ?? this.taId,
+      taName: taName ?? this.taName,
+    );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Subject &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          code == other.code &&
+          name == other.name &&
+          doctorId == other.doctorId &&
+          doctorName == other.doctorName &&
+          level == other.level &&
+          semester == other.semester &&
+          department == other.department &&
+          credits == other.credits &&
+          creditHours == other.creditHours &&
+          taId == other.taId &&
+          taName == other.taName;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        code,
+        name,
+        doctorId,
+        doctorName,
+        level,
+        semester,
+        department,
+        credits,
+        creditHours,
+        taId,
+        taName,
+      );
+
+  @override
+  String toString() =>
+      'Subject(id: $id, code: $code, name: $name, semester: $semester)';
 }

@@ -1,5 +1,5 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -10,6 +10,9 @@ import '../../../models/lecture.dart';
 import '../../../models/student.dart';
 import '../../../models/section.dart';
 import '../../../core/constants.dart';
+import '../../../core/di/service_locator.dart';
+import '../../../core/exceptions/app_exception.dart';
+import '../../../repositories/attendance_repository.dart';
 import '../../../services/websocket_service.dart';
 import '../../../widgets/app_skeleton.dart';
 import '../../../core/logger.dart';
@@ -73,6 +76,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   ];
   final List<int> _levels = [1, 2, 3, 4];
   static const _qrDuration = Duration(minutes: 30);
+
+  final AttendanceRepository _attendanceRepo = getIt<AttendanceRepository>();
 
   @override
   void initState() {
@@ -613,6 +618,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
           'SES-${DateTime.now().millisecondsSinceEpoch}-${lecture.id}';
       final now = DateTime.now();
 
+      // 1) Create the active session first so the camera page has something
+      //    to attach to when it loads.
       final res = await http
           .post(
             Uri.parse('${AppConstants.baseUrl}/api/active-sessions'),
@@ -645,6 +652,82 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         return;
       }
 
+      // 2) Ask the host page to open the camera. Server's success flag is
+      //    unreliable on this build, so we don't gate on it.
+      await _attendanceRepo.requestCameraHost(
+        token: token,
+        sessionId: sessionId,
+        lectureId: lecture.id,
+        doctorName: user.name,
+      );
+      if (!mounted) return;
+
+      // 3) Verify the camera actually came online. The camera page POSTs
+      //    /api/attendance-sessions/:sessionId on startup, so a 200 here
+      //    proves it's running. If it never shows up within the timeout,
+      //    the host page is closed or the popup was blocked → rollback.
+      //
+      // We show a non-dismissible dialog while polling. The face-api models
+      // pull from GitHub's CDN and routinely take 30-60 s on campus Wi-Fi,
+      // so the user needs to see that we're still waiting on purpose.
+      final progress = ValueNotifier<int>(0);
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20.r)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Color(0xFF0EA5E9)),
+              SizedBox(height: 20.h),
+              Text('Waiting for camera to start…',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16.sp,
+                      fontWeight: FontWeight.w600)),
+              SizedBox(height: 8.h),
+              ValueListenableBuilder<int>(
+                valueListenable: progress,
+                builder: (_, secs, __) => Text(
+                  '$secs s • face-recognition models loading',
+                  style: TextStyle(
+                      color: const Color(0xFF94A3B8), fontSize: 12.sp),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final cameraStarted = await _attendanceRepo.waitForCameraStarted(
+        sessionId: sessionId,
+        token: token,
+        onTick: (elapsed) => progress.value = elapsed.inSeconds,
+      );
+
+      progress.dispose();
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      if (!mounted) return;
+
+      if (!cameraStarted) {
+        // Rollback: kill the active session we just created so it doesn't
+        // sit there orphaned with nobody watching.
+        await _attendanceRepo.deleteSession(
+          sessionId: sessionId,
+          token: token,
+        );
+        if (!mounted) return;
+        _snack(
+            'Camera did not open within 90 s. Open the host page (host_listener.html) on the server, allow popups for it, and try again.',
+            Colors.red);
+        setState(() => _isActivating = false);
+        return;
+      }
+
       final ws = WebSocketService.instance;
       ws.sendMessage({
         'type': 'SESSION_ACTIVATED',
@@ -661,22 +744,6 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'doctorId': _ownerId(user),
         'timestamp': DateTime.now().toIso8601String()
       });
-
-      bool camOk = false;
-      try {
-        final cr = await http
-            .post(
-              Uri.parse('${AppConstants.baseUrl}/api/camera/request'),
-              headers: _headers(token),
-              body: jsonEncode({
-                'sessionId': sessionId,
-                'lectureId': lecture.id,
-                'doctorName': user.name,
-              }),
-            )
-            .timeout(const Duration(seconds: 10));
-        camOk = jsonDecode(cr.body)['success'] == true;
-      } catch (_) {}
 
       if (!mounted) return;
 
@@ -700,7 +767,7 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       _startPolling(sessionId, token);
       _startContinuousSync();
       _snack(
-          'Session started: ${lecture.subjectName} (${students.length} students)${camOk ? ' - Camera running' : ''}',
+          'Session started: ${lecture.subjectName} (${students.length} students) - Camera running',
           Colors.green);
     } catch (e) {
       debugPrint('Activate error: $e');
@@ -718,45 +785,47 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     final authState = context.read<AuthCubit>().state;
     if (authState.token == null) return;
 
-    try {
-      final res = await http.post(
-        Uri.parse('${AppConstants.baseUrl}/api/active-sessions/$_activeSessionId/begin-qr-phase'),
-        headers: _headers(authState.token!),
-        body: jsonEncode({'durationMinutes': 30}),
-      ).timeout(const Duration(seconds: 8));
-
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
+    final result = await _attendanceRepo.beginQrPhase(
+      sessionId: _activeSessionId!,
+      token: authState.token!,
+      durationMinutes: 30,
+    );
+    if (!mounted) return;
+    result.when(
+      success: (body) {
         final qrEndTimeStr = body['qrPhaseEndTime'] as String?;
-        final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
+        final qrEndTime =
+            qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
         final remaining = qrEndTime != null
             ? qrEndTime.difference(DateTime.now())
             : _qrDuration;
-
         setState(() {
           _phase = SessionPhase.confirming;
           _lectureEndedAt = DateTime.now();
           _sessionEndTime = qrEndTime ?? DateTime.now();
-          _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
+          _confirmRemaining =
+              remaining.isNegative ? Duration.zero : remaining;
         });
         _startConfirmTimer();
-        _snack('Lecture ended - QR confirmation open for 30 min', Colors.orange);
-      } else if (res.statusCode == 404) {
-        setState(() {
-          _phase = SessionPhase.none;
-          _activeSession = null;
-          _activeSessionId = null;
-          _sessionStartTime = null;
-          _sessionEndTime = null;
-          _sessionStudents = null;
-        });
-        _snack('Session was already ended on the server', Colors.orange);
-      } else {
-        _snack('Failed to end session (${res.statusCode})', Colors.red);
-      }
-    } catch (e) {
-      _snack('Connection error ending session', Colors.red);
-    }
+        _snack('Lecture ended - QR confirmation open for 30 min',
+            Colors.orange);
+      },
+      failure: (e) {
+        if (e is ServerException && e.statusCode == 404) {
+          setState(() {
+            _phase = SessionPhase.none;
+            _activeSession = null;
+            _activeSessionId = null;
+            _sessionStartTime = null;
+            _sessionEndTime = null;
+            _sessionStudents = null;
+          });
+          _snack('Session was already ended on the server', Colors.orange);
+        } else {
+          _snack('Failed to end session', Colors.red);
+        }
+      },
+    );
   }
 
 // ============================================
@@ -782,20 +851,17 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     Map<String, dynamic>? report;
 
     try {
-      final deleteRes = await http
-          .delete(
-            Uri.parse(
-                '${AppConstants.baseUrl}/api/active-sessions/$sessionIdSnapshot'),
-            headers: _headers(auth.token!),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      logDebug('Delete session response: ${deleteRes.statusCode}');
+      final deleteResult = await _attendanceRepo.deleteSession(
+        sessionId: sessionIdSnapshot!,
+        token: auth.token!,
+      );
+      final deleteStatus = deleteResult.valueOrNull ?? 0;
+      logDebug('Delete session response: $deleteStatus');
 
       // ── Already closed elsewhere (website / another device) ───────────
       // That device already saved the report — don't send a duplicate
       // (which, with stale state, comes out empty / "unknown" students).
-      if (deleteRes.statusCode == 404) {
+      if (deleteStatus == 404) {
         logDebug('Session already closed elsewhere — skipping duplicate report');
         _isFinalizing = false;
         if (mounted) {
@@ -805,8 +871,8 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         }
         return;
       }
-      if (deleteRes.statusCode != 200 && deleteRes.statusCode != 204) {
-        logDebug('⚠️ Session delete returned ${deleteRes.statusCode}: ${deleteRes.body}');
+      if (deleteStatus != 200 && deleteStatus != 204) {
+        logDebug('⚠️ Session delete returned $deleteStatus');
       }
 
       if (sessionStudentsSnapshot.isEmpty && _activeSession != null) {
@@ -814,23 +880,21 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
             await _getEnrolledStudents(_activeSession!.subjectId, auth.token!);
       }
 
-      try {
-        final freshRes = await http
-            .get(
-              Uri.parse(
-                  '${AppConstants.baseUrl}/api/attendance-session-data/$sessionIdSnapshot'),
-              headers: _headers(auth.token!),
-            )
-            .timeout(const Duration(seconds: 6));
-        if (freshRes.statusCode == 200) {
-          final freshData = jsonDecode(freshRes.body);
+      final freshResult = await _attendanceRepo.getSessionData(
+        sessionId: sessionIdSnapshot,
+        token: auth.token!,
+        timeout: const Duration(seconds: 6),
+      );
+      freshResult.when(
+        success: (freshData) {
           final freshRecs = (freshData['records'] as List?)
               ?.cast<Map<String, dynamic>>();
           if (freshRecs != null && freshRecs.isNotEmpty) {
             attendanceSnapshot = freshRecs;
           }
-        }
-      } catch (_) {}
+        },
+        failure: (_) {},
+      );
 
       final rptStudents = sessionStudentsSnapshot.map((s) {
             final rec = attendanceSnapshot
@@ -935,25 +999,22 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
         'students': rptStudents,
       };
 
-      final reportRes = await http
-          .post(
-            Uri.parse('${AppConstants.baseUrl}/api/attendance-reports'),
-            headers: _headers(auth.token!),
-            body: jsonEncode(report),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      logDebug('Report save response: ${reportRes.statusCode}');
-
-      if (reportRes.statusCode == 200) {
-        final ws = WebSocketService.instance;
-        ws.sendMessage({
-          'type': 'REPORT_SAVED',
-          'report': report,
-          'timestamp': DateTime.now().toIso8601String()
-        });
-        logDebug('📡 Broadcasted REPORT_SAVED');
-      }
+      final reportResult = await _attendanceRepo.saveReport(
+        token: auth.token!,
+        report: report,
+      );
+      reportResult.when(
+        success: (_) {
+          logDebug('Report saved');
+          WebSocketService.instance.sendMessage({
+            'type': 'REPORT_SAVED',
+            'report': report,
+            'timestamp': DateTime.now().toIso8601String(),
+          });
+          logDebug('📡 Broadcasted REPORT_SAVED');
+        },
+        failure: (e) => logDebug('Save report failed: $e'),
+      );
     } catch (e) {
       debugPrint('Finalize error: $e');
     }
@@ -983,48 +1044,31 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
   // ============================================
   void _startHeartbeat(String sid, String token) {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      try {
-        await http.post(
-          Uri.parse(
-              '${AppConstants.baseUrl}/api/active-sessions/$sid/heartbeat'),
-          headers: _headers(token),
-        );
-      } catch (_) {}
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _attendanceRepo.heartbeat(sessionId: sid, token: token);
     });
   }
 
   void _startPolling(String sid, String token) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      try {
-        final res = await http
-            .get(
-              Uri.parse(
-                  '${AppConstants.baseUrl}/api/attendance-session-data/$sid'),
-              headers: _headers(token),
-            )
-            .timeout(const Duration(seconds: 5));
-
-        if (res.statusCode == 404 && mounted && _phase != SessionPhase.none) {
-          _snack('Session closed from another device', const Color(0xFF0EA5E9));
-          _confirmTimer?.cancel();
-          _pollTimer?.cancel();
-          _heartbeatTimer?.cancel();
-          _resetSession();
-          return;
-        }
-
-        if (res.statusCode == 200 && mounted) {
-          final data = jsonDecode(res.body);
+      final result =
+          await _attendanceRepo.getSessionData(sessionId: sid, token: token);
+      if (!mounted) return;
+      result.when(
+        success: (data) {
           final recs =
               (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+          final sessionPhase =
+              (data['session']?['phase'] ?? data['phase']) as String?;
+          final qrEndTimeStr = (data['session']?['qrPhaseEndTime'] ??
+              data['qrPhaseEndTime']) as String?;
+          final qrEndTime =
+              qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
 
-          final sessionPhase = (data['session']?['phase'] ?? data['phase']) as String?;
-          final qrEndTimeStr = (data['session']?['qrPhaseEndTime'] ?? data['qrPhaseEndTime']) as String?;
-          final qrEndTime = qrEndTimeStr != null ? DateTime.tryParse(qrEndTimeStr) : null;
-
-          if (sessionPhase == 'qr' && _phase == SessionPhase.active && qrEndTime != null) {
+          if (sessionPhase == 'qr' &&
+              _phase == SessionPhase.active &&
+              qrEndTime != null) {
             final remaining = qrEndTime.difference(DateTime.now());
             final qrStartStr = (data['session']?['qrPhaseStartTime'] ??
                 data['qrPhaseStartTime']) as String?;
@@ -1033,10 +1077,13 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               _sessionEndTime = qrEndTime;
               _lectureEndedAt ??=
                   DateTime.tryParse(qrStartStr ?? '') ?? DateTime.now();
-              _confirmRemaining = remaining.isNegative ? Duration.zero : remaining;
+              _confirmRemaining =
+                  remaining.isNegative ? Duration.zero : remaining;
               _attendanceRecords = recs;
-              _confirmedCount = recs.where((r) => r['status'] == 'confirmed').length;
-              _pendingCount = recs.where((r) => r['status'] == 'pending').length;
+              _confirmedCount =
+                  recs.where((r) => r['status'] == 'confirmed').length;
+              _pendingCount =
+                  recs.where((r) => r['status'] == 'pending').length;
             });
             _startConfirmTimer();
             _snack('QR mode synced from server', Colors.orange);
@@ -1045,11 +1092,24 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
               _attendanceRecords = recs;
               _confirmedCount =
                   recs.where((r) => r['status'] == 'confirmed').length;
-              _pendingCount = recs.where((r) => r['status'] == 'pending').length;
+              _pendingCount =
+                  recs.where((r) => r['status'] == 'pending').length;
             });
           }
-        }
-      } catch (_) {}
+        },
+        failure: (e) {
+          if (e is ServerException &&
+              e.statusCode == 404 &&
+              _phase != SessionPhase.none) {
+            _snack('Session closed from another device',
+                const Color(0xFF0EA5E9));
+            _confirmTimer?.cancel();
+            _pollTimer?.cancel();
+            _heartbeatTimer?.cancel();
+            _resetSession();
+          }
+        },
+      );
     });
   }
 
@@ -1071,18 +1131,14 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
       _confirmedCount = records.where((r) => r['status'] == 'confirmed').length;
       _pendingCount = pending.length;
     });
-    try {
-      await http.post(
-        Uri.parse(
-            '${AppConstants.baseUrl}/api/attendance-session-data/$_activeSessionId'),
-        headers: _headers(auth.token!),
-        body: jsonEncode({
-          'records': records,
-          'pending': pending,
-          'lastUpdate': DateTime.now().toIso8601String(),
-        }),
-      ).timeout(const Duration(seconds: 8));
-    } catch (_) {
+    final result = await _attendanceRepo.pushSessionData(
+      sessionId: _activeSessionId!,
+      token: auth.token!,
+      records: records,
+      pending: pending,
+    );
+    if (!mounted) return;
+    if (!result.isSuccess) {
       _snack('Error syncing attendance', Colors.red);
     }
   }
@@ -1193,21 +1249,24 @@ class _DoctorAttendanceState extends State<DoctorAttendance>
     if (_activeSessionId == null || _recentLocalEdit) return;
     final auth = context.read<AuthCubit>().state;
     if (auth.token == null) return;
-    try {
-      final res = await http.get(
-        Uri.parse('${AppConstants.baseUrl}/api/attendance-session-data/$_activeSessionId'),
-        headers: _headers(auth.token!),
-      ).timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200 && mounted) {
-        final data = jsonDecode(res.body);
-        final recs = (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final result = await _attendanceRepo.getSessionData(
+      sessionId: _activeSessionId!,
+      token: auth.token!,
+    );
+    if (!mounted) return;
+    result.when(
+      success: (data) {
+        final recs =
+            (data['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         setState(() {
           _attendanceRecords = recs;
-          _confirmedCount = recs.where((r) => r['status'] == 'confirmed').length;
+          _confirmedCount =
+              recs.where((r) => r['status'] == 'confirmed').length;
           _pendingCount = recs.where((r) => r['status'] == 'pending').length;
         });
-      }
-    } catch (_) {}
+      },
+      failure: (_) {},
+    );
   }
 
   // ============================================

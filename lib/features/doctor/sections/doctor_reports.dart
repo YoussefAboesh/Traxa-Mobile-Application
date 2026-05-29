@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:http/http.dart' as http;
 import '../../../cubit/auth/auth_cubit.dart';
-import '../../../core/constants.dart';
+import '../../../core/di/service_locator.dart';
 import '../../../core/pdf_report_service.dart';
+import '../../../repositories/attendance_repository.dart';
 import '../../../services/websocket_service.dart';
 import '../../../widgets/toast_message.dart';
 import '../../../widgets/app_skeleton.dart';
@@ -36,6 +35,8 @@ class _DoctorReportsState extends State<DoctorReports> {
   // report (the website sometimes saves a report with non-enrolled names).
   List<Map<String, dynamic>> _allSubjects = [];
   final Map<int, Set<String>> _enrolledCache = {};
+
+  final AttendanceRepository _attendanceRepo = getIt<AttendanceRepository>();
 
   @override
   void initState() {
@@ -90,38 +91,30 @@ class _DoctorReportsState extends State<DoctorReports> {
         return;
       }
 
-      final res = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}/api/attendance-reports/doctor/$doctorId'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
+      final result = await _attendanceRepo.listReportsByDoctor(
+        doctorId: doctorId,
+        token: token,
+      );
+      if (!mounted) return;
+      await result.when(
+        success: (reports) async {
+          reports.sort((a, b) => (b['createdAt'] ?? b['created_at'] ?? '')
+              .compareTo(a['createdAt'] ?? a['created_at'] ?? ''));
+          await _filterReportsToEnrolled(reports, token);
+          if (!mounted) return;
+          setState(() {
+            _reports = reports;
+            _isLoading = false;
+          });
         },
-      ).timeout(const Duration(seconds: 10));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final reports = (data is List)
-            ? data
-                .cast<Map<String, dynamic>>()
-                .map((r) => Map<String, dynamic>.from(r))
-                .toList()
-            : <Map<String, dynamic>>[];
-        reports.sort((a, b) => (b['createdAt'] ?? b['created_at'] ?? '')
-            .compareTo(a['createdAt'] ?? a['created_at'] ?? ''));
-        await _filterReportsToEnrolled(reports, token);
-        if (!mounted) return;
-        setState(() {
-          _reports = reports;
-          _isLoading = false;
-        });
-      } else {
-        if (!mounted) return;
-        setState(() {
-          _error = 'Failed to load reports';
-          _isLoading = false;
-        });
-      }
+        failure: (_) async {
+          if (!mounted) return;
+          setState(() {
+            _error = 'Failed to load reports';
+            _isLoading = false;
+          });
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -141,19 +134,8 @@ class _DoctorReportsState extends State<DoctorReports> {
   Future<void> _filterReportsToEnrolled(
       List<Map<String, dynamic>> reports, String token) async {
     if (_allSubjects.isEmpty) {
-      try {
-        final res = await http.get(
-          Uri.parse('${AppConstants.baseUrl}/api/subjects'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token'
-          },
-        ).timeout(const Duration(seconds: 10));
-        if (res.statusCode == 200) {
-          final d = jsonDecode(res.body);
-          if (d is List) _allSubjects = d.cast<Map<String, dynamic>>();
-        }
-      } catch (_) {}
+      final result = await _attendanceRepo.listSubjects(token: token);
+      _allSubjects = result.valueOrNull ?? const [];
     }
 
     for (final report in reports) {
@@ -250,28 +232,18 @@ class _DoctorReportsState extends State<DoctorReports> {
       return _enrolledCache[subjectId]!;
     }
     final set = <String>{};
-    try {
-      final res = await http.get(
-        Uri.parse(
-            '${AppConstants.baseUrl}/api/subject/$subjectId/enrolled-students'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
-        },
-      ).timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) {
-        final d = jsonDecode(res.body);
-        final list = (d['students'] as List?) ?? [];
-        for (final s in list) {
-          if (s is Map) {
-            if (s['id'] != null) set.add(s['id'].toString());
-            if (s['student_id'] != null) set.add(s['student_id'].toString());
-            final nm = (s['name'] ?? '').toString();
-            if (nm.trim().isNotEmpty) set.add('name:${_normName(nm)}');
-          }
-        }
+    final result = await _attendanceRepo.getEnrolledStudents(
+      subjectId: subjectId,
+      token: token,
+    );
+    for (final s in result.valueOrNull ?? const []) {
+      if (s is Map) {
+        if (s['id'] != null) set.add(s['id'].toString());
+        if (s['student_id'] != null) set.add(s['student_id'].toString());
+        final nm = (s['name'] ?? '').toString();
+        if (nm.trim().isNotEmpty) set.add('name:${_normName(nm)}');
       }
-    } catch (_) {}
+    }
     _enrolledCache[subjectId] = set;
     return set;
   }
@@ -387,26 +359,19 @@ class _DoctorReportsState extends State<DoctorReports> {
         return;
       }
 
-      final response = await http.delete(
-        Uri.parse('${AppConstants.baseUrl}/api/attendance-reports/$reportId'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
+      final result = await _attendanceRepo.deleteReport(
+        reportId: reportId,
+        token: token,
+      );
+      if (!mounted) return;
+      result.when(
+        success: (_) {
+          setState(() => _reports.remove(report));
+          ToastMessage.showSuccess(context, 'Report deleted successfully');
         },
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        if (mounted) {
-          setState(() {
-            _reports.remove(report);
-          });
-        }
-        // ignore: use_build_context_synchronously
-        ToastMessage.showSuccess(context, 'Report deleted successfully');
-      } else {
-        // ignore: use_build_context_synchronously
-        ToastMessage.showError(context, 'Failed to delete report');
-      }
+        failure: (_) =>
+            ToastMessage.showError(context, 'Failed to delete report'),
+      );
     } catch (e) {
       // ignore: use_build_context_synchronously
       ToastMessage.showError(context, 'Error: ${e.toString()}');
@@ -1212,19 +1177,12 @@ class _DoctorReportsState extends State<DoctorReports> {
       final auth = context.read<AuthCubit>().state;
       final sessionId = report['sessionId'] ?? '';
       if (sessionId.isNotEmpty && auth.token != null) {
-        try {
-          final res = await http.get(
-            Uri.parse(
-                '${AppConstants.baseUrl}/api/attendance-reports/session/$sessionId'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ${auth.token}'
-            },
-          ).timeout(const Duration(seconds: 10));
-          if (res.statusCode == 200) {
-            fullReport = jsonDecode(res.body);
-          }
-        } catch (_) {}
+        final result = await _attendanceRepo.getReportBySession(
+          sessionId: sessionId,
+          token: auth.token!,
+        );
+        final fetched = result.valueOrNull;
+        if (fetched != null) fullReport = fetched;
       }
     }
 

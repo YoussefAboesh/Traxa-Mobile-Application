@@ -20,7 +20,7 @@ class Grade {
   final String academicYear;
   final bool isVisible;
 
-  Grade({
+  const Grade({
     required this.id,
     required this.studentId,
     required this.studentName,
@@ -40,6 +40,98 @@ class Grade {
     required this.academicYear,
     required this.isVisible,
   });
+
+  Grade copyWith({
+    int? id,
+    int? studentId,
+    String? studentName,
+    int? subjectId,
+    String? subjectName,
+    int? doctorId,
+    int? level,
+    String? department,
+    double? midterm,
+    double? oral,
+    double? practical,
+    double? attendance,
+    double? assignment,
+    double? finalExam,
+    double? total,
+    int? semester,
+    String? academicYear,
+    bool? isVisible,
+  }) {
+    return Grade(
+      id: id ?? this.id,
+      studentId: studentId ?? this.studentId,
+      studentName: studentName ?? this.studentName,
+      subjectId: subjectId ?? this.subjectId,
+      subjectName: subjectName ?? this.subjectName,
+      doctorId: doctorId ?? this.doctorId,
+      level: level ?? this.level,
+      department: department ?? this.department,
+      midterm: midterm ?? this.midterm,
+      oral: oral ?? this.oral,
+      practical: practical ?? this.practical,
+      attendance: attendance ?? this.attendance,
+      assignment: assignment ?? this.assignment,
+      finalExam: finalExam ?? this.finalExam,
+      total: total ?? this.total,
+      semester: semester ?? this.semester,
+      academicYear: academicYear ?? this.academicYear,
+      isVisible: isVisible ?? this.isVisible,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Grade &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          studentId == other.studentId &&
+          studentName == other.studentName &&
+          subjectId == other.subjectId &&
+          subjectName == other.subjectName &&
+          doctorId == other.doctorId &&
+          level == other.level &&
+          department == other.department &&
+          midterm == other.midterm &&
+          oral == other.oral &&
+          practical == other.practical &&
+          attendance == other.attendance &&
+          assignment == other.assignment &&
+          finalExam == other.finalExam &&
+          total == other.total &&
+          semester == other.semester &&
+          academicYear == other.academicYear &&
+          isVisible == other.isVisible;
+
+  @override
+  int get hashCode => Object.hashAll([
+        id,
+        studentId,
+        studentName,
+        subjectId,
+        subjectName,
+        doctorId,
+        level,
+        department,
+        midterm,
+        oral,
+        practical,
+        attendance,
+        assignment,
+        finalExam,
+        total,
+        semester,
+        academicYear,
+        isVisible,
+      ]);
+
+  @override
+  String toString() =>
+      'Grade(studentId: $studentId, subject: $subjectName, total: $total, visible: $isVisible)';
 
   factory Grade.fromJson(Map<String, dynamic> json) {
     return Grade(

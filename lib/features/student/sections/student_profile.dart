@@ -583,24 +583,28 @@ class _StudentProfileState extends State<StudentProfile> {
                       if (_showQRCode &&
                           _qrCodeData != null &&
                           _qrCodeData!.isNotEmpty) ...[
-                        Container(
-                          padding: EdgeInsets.all(16.r),
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16.r)),
-                          child: QrImageView(
-                              data: _qrCodeData!,
-                              version: QrVersions.auto,
-                              size: 200.w),
+                        Center(
+                          child: Container(
+                            padding: EdgeInsets.all(16.r),
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16.r)),
+                            child: QrImageView(
+                                data: _qrCodeData!,
+                                version: QrVersions.auto,
+                                size: 200.w),
+                          ),
                         ),
                         SizedBox(height: 12.h),
-                        TextButton.icon(
-                          onPressed: () => setState(() {
-                            _showQRCode = false;
-                            _qrCodeData = null;
-                          }),
-                          icon: Icon(Icons.close, size: 18.sp),
-                          label: const Text('Hide QR Code'),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: () => setState(() {
+                              _showQRCode = false;
+                              _qrCodeData = null;
+                            }),
+                            icon: Icon(Icons.close, size: 18.sp),
+                            label: const Text('Hide QR Code'),
+                          ),
                         ),
                       ] else
                         SizedBox(
